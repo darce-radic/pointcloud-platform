@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Standalone output for Railway/Docker deployment
+  output: "standalone",
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: '*.supabase.co' },
@@ -8,8 +10,6 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: '*.cloudfront.net' },
     ],
   },
-  // Next.js 16 uses Turbopack by default
-  turbopack: {},
 };
 
 export default nextConfig;
