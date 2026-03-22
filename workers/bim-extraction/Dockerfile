@@ -2,9 +2,9 @@
 # Uses Miniconda3 as base for PDAL + conda-forge dependencies
 FROM continuumio/miniconda3:24.1.2-0
 
-# Install PDAL, ifcopenshell and Python via conda-forge
+# Install PDAL, ifcopenshell, numpy, scipy, shapely and Python via conda-forge
 RUN conda install -n base -c conda-forge \
-    pdal python-pdal python=3.11 ifcopenshell -y && \
+    pdal python-pdal python=3.11 ifcopenshell numpy scipy shapely -y && \
     conda clean -afy
 
 WORKDIR /app
