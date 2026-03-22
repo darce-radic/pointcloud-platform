@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Link from 'next/link'
+import { POINT_CLOUD_DATA } from './pointCloudData'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type AssetType =
@@ -280,6 +281,19 @@ export default function RoadAssetsDemoClient() {
     if (!ctx) return
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    // ── Point cloud backdrop ──────────────────────────────────────────────────
+    // Render raw LiDAR points as small coloured dots behind the vector assets
+    const ptRadius = Math.max(1, transform.current.scale * 0.18)
+    for (const pt of POINT_CLOUD_DATA) {
+      const [sx, sy] = toScreen(pt[0], pt[1], canvas)
+      // Skip points outside viewport (with margin)
+      if (sx < -4 || sx > canvas.width + 4 || sy < -4 || sy > canvas.height + 4) continue
+      ctx.beginPath()
+      ctx.arc(sx, sy, ptRadius, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(${pt[2]},${pt[3]},${pt[4]},${(pt[5] / 255).toFixed(2)})`
+      ctx.fill()
+    }
 
     // Subtle grid
     ctx.strokeStyle = 'rgba(255,255,255,0.03)'
