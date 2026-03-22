@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
 import Link from 'next/link'
 import { POINT_CLOUD_DATA } from './pointCloudData'
+
+const PointCloud3DViewer = lazy(() => import('./PointCloud3DViewer'))
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type AssetType =
@@ -243,6 +245,7 @@ export default function RoadAssetsDemoClient() {
   })
   const [hoveredAsset, setHoveredAsset] = useState<AssetType | null>(null)
   const [activeStep, setActiveStep] = useState<number | null>(null)
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
 
   // Transform state
   const transform = useRef({ x: 0, y: 0, scale: 1 })
@@ -539,7 +542,30 @@ export default function RoadAssetsDemoClient() {
         </Link>
         <span className="text-white/20">/</span>
         <span className="text-sm font-medium">Road Asset Detection</span>
-        <span className="ml-auto text-xs font-semibold bg-white/10 text-white/80 px-3 py-1 rounded-full">
+        {/* 2D / 3D toggle */}
+        <div className="ml-auto flex items-center gap-1 bg-white/5 border border-white/10 rounded-full p-0.5">
+          <button
+            onClick={() => setViewMode('2d')}
+            className={`text-xs font-semibold px-3 py-1 rounded-full transition-all ${
+              viewMode === '2d'
+                ? 'bg-white text-black'
+                : 'text-white/50 hover:text-white'
+            }`}
+          >
+            2D
+          </button>
+          <button
+            onClick={() => setViewMode('3d')}
+            className={`text-xs font-semibold px-3 py-1 rounded-full transition-all ${
+              viewMode === '3d'
+                ? 'bg-white text-black'
+                : 'text-white/50 hover:text-white'
+            }`}
+          >
+            3D
+          </button>
+        </div>
+        <span className="text-xs font-semibold bg-white/10 text-white/80 px-3 py-1 rounded-full">
           Demo
         </span>
         <Link
@@ -680,12 +706,22 @@ export default function RoadAssetsDemoClient() {
           </div>
         </aside>
 
-        {/* ── Canvas ── */}
+        {/* ── Canvas / 3D Viewer ── */}
         <div
           ref={wrapRef}
           className="flex-1 relative overflow-hidden bg-[#080a0f]"
         >
+          {viewMode === '3d' && (
+            <Suspense fallback={
+              <div className="absolute inset-0 flex items-center justify-center text-white/30 text-sm">
+                Loading 3D viewer…
+              </div>
+            }>
+              <PointCloud3DViewer visibleLayers={visibleLayers} />
+            </Suspense>
+          )}
           <canvas
+            style={{ display: viewMode === '2d' ? 'block' : 'none' }}
             ref={canvasRef}
             className="block cursor-grab active:cursor-grabbing"
             onMouseMove={handleMouseMove}
@@ -748,9 +784,11 @@ export default function RoadAssetsDemoClient() {
           </div>
 
           {/* Info bar */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 border border-white/10 rounded-full px-4 py-1.5 text-[11px] text-white/30 backdrop-blur-sm pointer-events-none">
-            Scroll to zoom · Drag to pan · Hover assets for details
-          </div>
+          {viewMode === '2d' && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 border border-white/10 rounded-full px-4 py-1.5 text-[11px] text-white/30 backdrop-blur-sm pointer-events-none">
+              Scroll to zoom · Drag to pan · Hover assets for details
+            </div>
+          )}
 
           {/* Tooltip */}
           {tooltip.visible && (
