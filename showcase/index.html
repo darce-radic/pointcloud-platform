@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PointCloud Platform — Intelligent Geospatial Workflows</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── DESIGN TOKENS ─────────────────────────────────────────────────────── */
+    :root {
+      --bg:        #000000;
+      --bg-1:      #0a0a0a;
+      --bg-2:      #111111;
+      --bg-3:      #1a1a1a;
+      --bg-4:      #222222;
+      --bg-5:      #2a2a2a;
+      --border:    rgba(255,255,255,0.07);
+      --border-2:  rgba(255,255,255,0.12);
+      --border-3:  rgba(255,255,255,0.18);
+      --muted:     #555555;
+      --subtle:    #777777;
+      --secondary: #999999;
+      --tertiary:  #bbbbbb;
+      --primary:   #dddddd;
+      --white:     #ffffff;
+      --radius-xs: 4px;
+      --radius-sm: 6px;
+      --radius:    10px;
+      --radius-lg: 14px;
+      --radius-xl: 20px;
+      --radius-2xl:28px;
+    }
+
+    /* ─── RESET ─────────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    body {
+      background: var(--bg);
+      color: var(--primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+    a { color: inherit; text-decoration: none; }
+    button { cursor: pointer; font-family: inherit; }
+    input, select, textarea { font-family: inherit; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+
+    /* ─── NAVIGATION ─────────────────────────────────────────────────────────── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: 52px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 28px;
+      background: rgba(0,0,0,0.9);
+      backdrop-filter: blur(24px) saturate(200%);
+      -webkit-backdrop-filter: blur(24px) saturate(200%);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 13.5px; font-weight: 600; color: var(--white);
+      letter-spacing: -0.015em;
+    }
+    .nav-logo-mark {
+      width: 26px; height: 26px; border-radius: 6px;
+      background: var(--white);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .nav-logo-mark svg { width: 14px; height: 14px; }
+    .nav-center {
+      display: flex; align-items: center; gap: 2px;
+      position: absolute; left: 50%; transform: translateX(-50%);
+    }
+    .nav-center a {
+      font-size: 13px; font-weight: 450; color: var(--subtle);
+      padding: 5px 11px; border-radius: var(--radius-sm);
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-center a:hover { color: var(--white); background: var(--bg-3); }
+    .nav-right { display: flex; align-items: center; gap: 10px; }
+    .nav-gh {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12.5px; font-weight: 500; color: var(--secondary);
+      padding: 5px 12px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border-2);
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .nav-gh:hover { color: var(--white); border-color: var(--border-3); }
+    .nav-cta {
+      font-size: 12.5px; font-weight: 600; color: var(--bg);
+      background: var(--white); padding: 5px 14px;
+      border-radius: var(--radius-sm); transition: opacity 0.15s;
+    }
+    .nav-cta:hover { opacity: 0.85; }
+
+    /* ─── LAYOUT ─────────────────────────────────────────────────────────────── */
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+    section { padding: 96px 0; }
+
+    /* ─── EYEBROW LABEL ──────────────────────────────────────────────────────── */
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em;
+      text-transform: uppercase; color: var(--muted);
+      border: 1px solid var(--border-2); border-radius: 100px;
+      padding: 4px 12px; margin-bottom: 22px;
+    }
+    .eyebrow-dot {
+      width: 4px; height: 4px; border-radius: 50%; background: var(--muted);
+    }
+    .eyebrow-dot.pulse { background: var(--white); animation: blink 2s ease-in-out infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+    /* ─── HERO ───────────────────────────────────────────────────────────────── */
+    #hero {
+      padding: 148px 0 88px;
+      text-align: center;
+      position: relative;
+    }
+    #hero::before {
+      content: '';
+      position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(ellipse 70% 55% at 50% 40%, rgba(255,255,255,0.025) 0%, transparent 65%);
+    }
+    .hero-content { position: relative; }
+    .hero-h1 {
+      font-size: clamp(40px, 5.5vw, 68px);
+      font-weight: 700; letter-spacing: -0.045em; line-height: 1.04;
+      color: var(--white); margin-bottom: 18px;
+    }
+    .hero-h1 span { color: var(--secondary); }
+    .hero-sub {
+      font-size: 16px; font-weight: 400; color: var(--subtle);
+      max-width: 480px; margin: 0 auto 36px; line-height: 1.7;
+    }
+    .hero-btns {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; flex-wrap: wrap; margin-bottom: 60px;
+    }
+    .btn-w {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: var(--white); color: var(--bg);
+      font-size: 13.5px; font-weight: 600;
+      padding: 9px 18px; border-radius: var(--radius);
+      border: none; transition: opacity 0.15s;
+    }
+    .btn-w:hover { opacity: 0.87; }
+    .btn-g {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: transparent; color: var(--secondary);
+      font-size: 13.5px; font-weight: 500;
+      padding: 9px 18px; border-radius: var(--radius);
+      border: 1px solid var(--border-2);
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-g:hover { color: var(--white); border-color: var(--border-3); }
+
+    /* Stats */
+    .stats-row {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      border: 1px solid var(--border); border-radius: var(--radius-xl);
+      background: var(--bg-1); overflow: hidden;
+    }
+    .stat-cell {
+      padding: 26px 20px; text-align: center;
+      border-right: 1px solid var(--border);
+    }
+    .stat-cell:last-child { border-right: none; }
+    .stat-n {
+      font-size: 30px; font-weight: 700; letter-spacing: -0.04em;
+      color: var(--white); line-height: 1;
+    }
+    .stat-l {
+      font-size: 10.5px; font-weight: 500; color: var(--muted);
+      letter-spacing: 0.07em; text-transform: uppercase; margin-top: 5px;
+    }
+
+    /* ─── SECTION HEADING ────────────────────────────────────────────────────── */
+    .sec-head { margin-bottom: 52px; }
+    .sec-head.center { text-align: center; max-width: 580px; margin: 0 auto 52px; }
+    .sec-title {
+      font-size: clamp(26px, 3.2vw, 38px);
+      font-weight: 700; letter-spacing: -0.035em;
+      color: var(--white); line-height: 1.15; margin-bottom: 12px;
+    }
+    .sec-title span { color: var(--secondary); }
+    .sec-desc { font-size: 14.5px; color: var(--subtle); line-height: 1.7; }
+
+    /* ─── DIVIDER ────────────────────────────────────────────────────────────── */
+    hr.div { border: none; border-top: 1px solid var(--border); }
+
+    /* ─── CHAT DEMO ──────────────────────────────────────────────────────────── */
+    .demo-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;
+    }
+    .panel {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: var(--radius-xl); overflow: hidden;
+    }
+    .panel-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      background: var(--bg-2);
+    }
+    .panel-bar-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .panel-bar-tag {
+      font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--muted);
+      border: 1px solid var(--border-2); border-radius: var(--radius-xs);
+      padding: 2px 7px;
+    }
+    .panel-bar-tag.live { color: var(--white); border-color: var(--border-3); }
+
+    /* Chat messages */
+    .chat-msgs {
+      padding: 16px; display: flex; flex-direction: column; gap: 12px;
+      min-height: 300px;
+    }
+    .cmsg { display: flex; gap: 9px; align-items: flex-start; }
+    .cmsg.user { flex-direction: row-reverse; }
+    .cav {
+      width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700;
+    }
+    .cav.ai { background: var(--bg-4); color: var(--secondary); border: 1px solid var(--border-2); }
+    .cav.usr { background: var(--white); color: var(--bg); }
+    .cbub {
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: 3px var(--radius) var(--radius) var(--radius);
+      padding: 9px 13px; font-size: 12.5px; color: var(--secondary);
+      line-height: 1.55; max-width: 88%;
+    }
+    .cbub.user {
+      background: var(--bg-2); border-color: var(--border-2);
+      border-radius: var(--radius) 3px var(--radius) var(--radius);
+      color: var(--primary);
+    }
+    .cbub strong { color: var(--white); font-weight: 600; }
+    .cbub .step { display: block; color: var(--secondary); font-size: 12px; margin-top: 2px; }
+    .cbub .done-line {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11.5px; color: var(--subtle); margin-top: 8px;
+    }
+    .cbub .done-line::before {
+      content: ''; width: 4px; height: 4px; border-radius: 50%;
+      background: var(--white); flex-shrink: 0;
+    }
+
+    /* Quick prompts */
+    .qprompts {
+      display: flex; gap: 5px; flex-wrap: wrap;
+      padding: 9px 14px; border-top: 1px solid var(--border);
+      background: var(--bg-2);
+    }
+    .qp {
+      font-size: 11px; font-weight: 500; color: var(--muted);
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 3px 9px;
+      cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .qp:hover { color: var(--white); border-color: var(--border-2); }
+
+    /* Chat input */
+    .chat-input-row {
+      display: flex; gap: 7px; padding: 10px 14px;
+      border-top: 1px solid var(--border); background: var(--bg-2);
+    }
+    .chat-input {
+      flex: 1; background: var(--bg-3); border: 1px solid var(--border-2);
+      border-radius: var(--radius-sm); padding: 7px 11px;
+      font-size: 12.5px; color: var(--primary); outline: none;
+      transition: border-color 0.15s;
+    }
+    .chat-input::placeholder { color: var(--muted); }
+    .chat-input:focus { border-color: var(--border-3); }
+    .chat-send-btn {
+      width: 32px; height: 32px; background: var(--white); color: var(--bg);
+      border: none; border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      transition: opacity 0.15s;
+    }
+    .chat-send-btn:hover { opacity: 0.8; }
+
+    /* Workflow output */
+    .wf-area { padding: 16px; }
+    .wf-top {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .wf-name { font-size: 12.5px; font-weight: 600; color: var(--white); }
+    .wf-actions { display: flex; align-items: center; gap: 8px; }
+    .wf-status {
+      font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--muted);
+      border: 1px solid var(--border-2); border-radius: var(--radius-xs);
+      padding: 2px 7px;
+    }
+    .wf-deploy {
+      font-size: 11.5px; font-weight: 600; color: var(--bg);
+      background: var(--white); border: none; border-radius: var(--radius-sm);
+      padding: 4px 12px; transition: opacity 0.15s;
+    }
+    .wf-deploy:hover { opacity: 0.85; }
+    .wf-nodes {
+      display: flex; align-items: center; gap: 0;
+      overflow-x: auto; padding-bottom: 2px;
+    }
+    .wf-node {
+      display: flex; flex-direction: column; align-items: center;
+      background: var(--bg-3); border: 1px solid var(--border-2);
+      border-radius: var(--radius); padding: 10px 8px; min-width: 74px;
+      text-align: center; flex-shrink: 0;
+    }
+    .wf-node-ico {
+      width: 28px; height: 28px; border-radius: var(--radius-sm);
+      background: var(--bg-4); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; margin-bottom: 6px;
+    }
+    .wf-node-n { font-size: 10px; font-weight: 600; color: var(--white); line-height: 1.2; }
+    .wf-node-l { font-size: 9.5px; color: var(--muted); margin-top: 2px; }
+    .wf-arr {
+      width: 20px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .json-box {
+      margin-top: 14px; background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .json-box-hd {
+      padding: 7px 12px; border-bottom: 1px solid var(--border);
+      font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .json-box pre {
+      padding: 11px 12px; font-size: 10.5px; line-height: 1.65;
+      color: var(--secondary); overflow-x: auto;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+    .jk { color: var(--secondary); }
+    .js { color: var(--tertiary); }
+    .jc { color: var(--muted); }
+
+    /* ─── STAGES ─────────────────────────────────────────────────────────────── */
+    .stages { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .stage {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 20px 16px;
+      transition: border-color 0.2s;
+    }
+    .stage:hover { border-color: var(--border-2); }
+    .stage-n {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+      color: var(--muted); margin-bottom: 12px;
+    }
+    .stage-t { font-size: 13px; font-weight: 600; color: var(--white); margin-bottom: 7px; line-height: 1.3; }
+    .stage-d { font-size: 11.5px; color: var(--subtle); line-height: 1.55; }
+
+    /* ─── VIEWER ─────────────────────────────────────────────────────────────── */
+    .viewer-shell {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: var(--radius-2xl); overflow: hidden;
+    }
+    .viewer-tb {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      background: var(--bg-2);
+    }
+    .vdots { display: flex; gap: 5px; }
+    .vdot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--bg-4); border: 1px solid var(--border-2);
+    }
+    .vfile { font-size: 11.5px; color: var(--subtle); font-weight: 500; }
+    .vmeta { font-size: 10.5px; color: var(--muted); }
+    .viewer-body { display: grid; grid-template-columns: 1fr 264px; }
+    .viewer-canvas {
+      position: relative; height: 400px;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .pc-canvas { position: absolute; inset: 0; }
+    .v-overlay-tl {
+      position: absolute; top: 12px; left: 12px;
+    }
+    .v-badge {
+      font-size: 10px; font-weight: 500; color: var(--secondary);
+      background: rgba(0,0,0,0.75); border: 1px solid var(--border-2);
+      border-radius: var(--radius-sm); padding: 4px 9px;
+      backdrop-filter: blur(8px);
+    }
+    .v-overlay-tr {
+      position: absolute; top: 12px; right: 12px;
+      display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+    }
+    .v-result {
+      font-size: 10px; font-weight: 500; color: var(--secondary);
+      background: rgba(0,0,0,0.75); border: 1px solid var(--border-2);
+      border-radius: var(--radius-sm); padding: 4px 9px;
+      backdrop-filter: blur(8px);
+    }
+    .v-controls {
+      position: absolute; bottom: 12px; left: 12px; display: flex; gap: 5px;
+    }
+    .v-ctrl {
+      font-size: 10.5px; font-weight: 500; color: var(--secondary);
+      background: rgba(0,0,0,0.75); border: 1px solid var(--border-2);
+      border-radius: var(--radius-sm); padding: 4px 9px;
+      backdrop-filter: blur(8px); cursor: pointer;
+      transition: color 0.15s;
+    }
+    .v-ctrl:hover { color: var(--white); }
+    .v-tech {
+      position: absolute; bottom: 12px; right: 12px;
+      font-size: 9.5px; color: var(--muted);
+      background: rgba(0,0,0,0.75); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 3px 9px;
+      backdrop-filter: blur(8px);
+    }
+
+    /* Sidebar */
+    .vsidebar { display: flex; flex-direction: column; background: var(--bg-1); }
+    .vsec { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    .vsec-title {
+      font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 9px;
+    }
+    .tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .tbtn {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 6px 8px;
+      font-size: 11px; font-weight: 500; color: var(--secondary);
+      cursor: pointer; transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap; overflow: hidden;
+    }
+    .tbtn:hover { border-color: var(--border-2); color: var(--white); }
+    .tbtn.active { border-color: var(--white); color: var(--white); background: var(--bg-4); }
+    .tbtn.running { border-color: var(--border-2); color: var(--secondary); }
+    .tstat { margin-left: auto; font-size: 8.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+    .tstat.done { color: var(--subtle); }
+    .tstat.run::after { content: '…'; animation: blink 1.5s infinite; }
+    .tadd {
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      width: 100%; background: transparent; border: 1px dashed var(--border);
+      border-radius: var(--radius-sm); padding: 6px;
+      font-size: 11px; color: var(--muted); cursor: pointer;
+      transition: border-color 0.15s, color 0.15s; margin-top: 5px;
+    }
+    .tadd:hover { border-color: var(--border-2); color: var(--secondary); }
+
+    /* Tool detail */
+    .vdetail { padding: 12px 14px; flex: 1; }
+    .vd-name { font-size: 12.5px; font-weight: 600; color: var(--white); margin-bottom: 5px; }
+    .vd-desc { font-size: 11.5px; color: var(--subtle); line-height: 1.55; margin-bottom: 12px; }
+    .vd-field { margin-bottom: 9px; }
+    .vd-label {
+      display: block; font-size: 10.5px; font-weight: 500;
+      color: var(--muted); margin-bottom: 3px;
+    }
+    .vd-input {
+      width: 100%; background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 5px 9px;
+      font-size: 11.5px; color: var(--primary); outline: none;
+      transition: border-color 0.15s;
+    }
+    .vd-input:focus { border-color: var(--border-2); }
+    .vd-progress { height: 2px; background: var(--bg-4); border-radius: 1px; margin: 12px 0 6px; overflow: hidden; }
+    .vd-fill { height: 100%; background: var(--white); border-radius: 1px; transition: width 0.3s; }
+    .vd-plabel { font-size: 10px; color: var(--muted); margin-bottom: 9px; }
+    .vd-run {
+      width: 100%; background: var(--white); color: var(--bg);
+      border: none; border-radius: var(--radius-sm); padding: 7px;
+      font-size: 12px; font-weight: 600; transition: opacity 0.15s;
+    }
+    .vd-run:hover { opacity: 0.85; }
+    .vd-result {
+      margin-top: 9px; padding: 9px 11px;
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 11px; color: var(--subtle); line-height: 1.55;
+    }
+
+    /* ─── PRE-BUILT TOOLS ────────────────────────────────────────────────────── */
+    .tools-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .tcard {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: var(--radius-xl); padding: 22px;
+      transition: border-color 0.2s;
+    }
+    .tcard:hover { border-color: var(--border-2); }
+    .tcard-ico {
+      width: 36px; height: 36px; border-radius: var(--radius);
+      background: var(--bg-3); border: 1px solid var(--border-2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; margin-bottom: 12px;
+    }
+    .tcard-name { font-size: 13.5px; font-weight: 600; color: var(--white); margin-bottom: 5px; }
+    .tcard-desc { font-size: 12px; color: var(--subtle); line-height: 1.6; margin-bottom: 12px; }
+    .tcard-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+    .tag {
+      font-size: 10px; font-weight: 500; color: var(--muted);
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-xs); padding: 2px 7px;
+    }
+    .tcard.add {
+      border-style: dashed; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center;
+      cursor: pointer; min-height: 160px;
+    }
+    .tcard.add:hover { border-color: var(--border-2); }
+    .add-ico {
+      width: 36px; height: 36px; border-radius: var(--radius);
+      background: var(--bg-3); border: 1px solid var(--border-2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; margin-bottom: 10px;
+    }
+    .add-t { font-size: 13px; font-weight: 600; color: var(--secondary); margin-bottom: 5px; }
+    .add-d { font-size: 11.5px; color: var(--muted); }
+
+    /* ─── DYNAMIC REGISTRY ───────────────────────────────────────────────────── */
+    .reg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .code-panel {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: var(--radius-xl); overflow: hidden;
+    }
+    .code-panel-hd {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 11px 16px; border-bottom: 1px solid var(--border);
+      background: var(--bg-2);
+    }
+    .code-panel-title { font-size: 11.5px; font-weight: 600; color: var(--secondary); }
+    .code-panel-lang {
+      font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .code-panel pre {
+      padding: 18px; font-size: 11.5px; line-height: 1.7;
+      color: var(--secondary); overflow-x: auto;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+    .ck { color: var(--tertiary); }
+    .cs { color: var(--secondary); }
+    .cc { color: var(--muted); }
+
+    /* ─── ARCHITECTURE ───────────────────────────────────────────────────────── */
+    .arch { display: flex; flex-direction: column; gap: 2px; }
+    .arch-layer {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .arch-hd {
+      display: flex; align-items: center; gap: 11px;
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      background: var(--bg-2);
+    }
+    .arch-num {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--bg-4); border: 1px solid var(--border-2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9.5px; font-weight: 700; color: var(--secondary); flex-shrink: 0;
+    }
+    .arch-name { font-size: 12.5px; font-weight: 600; color: var(--white); }
+    .arch-body { display: flex; gap: 7px; flex-wrap: wrap; padding: 12px 18px; }
+    .arch-chip {
+      font-size: 11.5px; font-weight: 500; color: var(--secondary);
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 4px 11px;
+    }
+    .arch-arr { display: flex; justify-content: center; padding: 3px 0; }
+
+    /* ─── NODE TABLE ─────────────────────────────────────────────────────────── */
+    .ntable-wrap {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: var(--radius-xl); overflow: hidden;
+    }
+    .ntable { width: 100%; border-collapse: collapse; }
+    .ntable th {
+      font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--muted);
+      padding: 11px 18px; text-align: left;
+      border-bottom: 1px solid var(--border); background: var(--bg-2);
+    }
+    .ntable td {
+      font-size: 12.5px; color: var(--secondary);
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .ntable tr:last-child td { border-bottom: none; }
+    .ntable tr:hover td { background: var(--bg-2); }
+    .ntable td:first-child { color: var(--white); font-weight: 500; }
+    .ntable td:last-child { text-align: center; }
+    .ck2 { color: var(--secondary); }
+    .cp { color: var(--muted); }
+    .cd { color: var(--bg-5); }
+    .ltag {
+      display: inline-block; font-size: 10.5px; font-weight: 500; color: var(--muted);
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-xs); padding: 1px 6px; margin: 1px 2px;
+    }
+
+    /* ─── CTA ────────────────────────────────────────────────────────────────── */
+    #cta { text-align: center; border-top: 1px solid var(--border); }
+    .cta-btns {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; flex-wrap: wrap; margin-top: 32px;
+    }
+
+    /* ─── FOOTER ─────────────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 24px 28px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 10px;
+    }
+    .fl { font-size: 11.5px; color: var(--muted); }
+    .flinks { display: flex; gap: 18px; }
+    .flinks a { font-size: 11.5px; color: var(--muted); transition: color 0.15s; }
+    .flinks a:hover { color: var(--secondary); }
+
+    /* ─── RESPONSIVE ─────────────────────────────────────────────────────────── */
+    @media (max-width: 920px) {
+      .demo-grid, .reg-grid { grid-template-columns: 1fr; }
+      .stages { grid-template-columns: repeat(2, 1fr); }
+      .tools-grid { grid-template-columns: repeat(2, 1fr); }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .stat-cell:nth-child(2) { border-right: none; }
+      .viewer-body { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      .stages, .tools-grid { grid-template-columns: 1fr; }
+      nav { padding: 0 16px; }
+      .nav-center { display: none; }
+      .container { padding: 0 16px; }
+      section { padding: 72px 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">
+    <div class="nav-logo-mark">
+      <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="3.5" cy="3.5" r="1.2" fill="#000"/>
+        <circle cx="7" cy="2.5" r="1.2" fill="#000"/>
+        <circle cx="10.5" cy="4" r="1.2" fill="#000"/>
+        <circle cx="2.5" cy="7" r="1.2" fill="#000"/>
+        <circle cx="7" cy="7" r="1.2" fill="#000"/>
+        <circle cx="11.5" cy="7" r="1.2" fill="#000"/>
+        <circle cx="4" cy="10.5" r="1.2" fill="#000"/>
+        <circle cx="9" cy="11.5" r="1.2" fill="#000"/>
+      </svg>
+    </div>
+    PointCloud Platform
+  </a>
+  <div class="nav-center">
+    <a href="#system1">NL Workflows</a>
+    <a href="#system2">Viewer Tools</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#nodes">Node Library</a>
+  </div>
+  <div class="nav-right">
+    <a href="https://github.com/darce-radic/pointcloud-platform" target="_blank" class="nav-gh">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1C3.462 1 1 3.462 1 6.5c0 2.426 1.573 4.486 3.756 5.212.275.05.375-.119.375-.265 0-.13-.005-.475-.007-.933-1.53.332-1.852-.738-1.852-.738-.25-.635-.61-.804-.61-.804-.499-.341.038-.334.038-.334.552.039.842.567.842.567.49.84 1.286.598 1.6.457.05-.355.192-.598.349-.735-1.22-.139-2.503-.61-2.503-2.715 0-.6.214-1.09.566-1.474-.057-.139-.245-.697.053-1.453 0 0 .461-.148 1.51.563A5.26 5.26 0 016.5 4.37c.467.002.936.063 1.375.185 1.048-.71 1.508-.563 1.508-.563.3.756.111 1.314.055 1.453.353.384.565.874.565 1.474 0 2.11-1.285 2.574-2.509 2.71.197.17.373.505.373 1.018 0 .736-.007 1.329-.007 1.51 0 .147.099.32.378.265C11.428 10.984 13 8.924 13 6.5 13 3.462 10.538 1 6.5 1z" fill="currentColor"/></svg>
+      GitHub
+    </a>
+    <a href="#system1" class="nav-cta">View Demo</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div class="container">
+    <div class="hero-content">
+      <div class="eyebrow">
+        <span class="eyebrow-dot"></span>
+        Open Source Platform
+      </div>
+      <h1 class="hero-h1">
+        Geospatial Workflows,<br>
+        <span>Powered by Language</span>
+      </h1>
+      <p class="hero-sub">
+        Build, run, and share complex point cloud processing pipelines using natural language.
+        No code required — describe what you want and the AI handles the rest.
+      </p>
+      <div class="hero-btns">
+        <a href="#system1" class="btn-w">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M7 2.5l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          See NL Workflow Demo
+        </a>
+        <a href="#system2" class="btn-g">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="9" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 5.5h6M3.5 7.5h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          Explore Viewer Tools
+        </a>
+      </div>
+      <div class="stats-row">
+        <div class="stat-cell">
+          <div class="stat-n">30+</div>
+          <div class="stat-l">Geospatial Nodes</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-n">5</div>
+          <div class="stat-l">AI Agent Stages</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-n">Zero</div>
+          <div class="stat-l">Code Required</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-n">100%</div>
+          <div class="stat-l">Open Source</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="div" />
+
+<!-- SYSTEM 1 -->
+<section id="system1">
+  <div class="container">
+    <div class="eyebrow">
+      <span class="eyebrow-dot pulse"></span>
+      System 1
+    </div>
+    <div class="sec-head">
+      <h2 class="sec-title">Natural Language<br><span>Workflow Creation</span></h2>
+      <p class="sec-desc">
+        Describe your geospatial processing task in plain English. The AI agent understands your intent,
+        selects the right tools from the node library, and generates a complete n8n workflow — ready to deploy in seconds.
+      </p>
+    </div>
+
+    <div class="demo-grid">
+      <!-- Chat -->
+      <div class="panel">
+        <div class="panel-bar">
+          <span class="panel-bar-title">Chat with the AI Agent</span>
+          <span class="panel-bar-tag live">Live Demo</span>
+        </div>
+        <div class="chat-msgs" id="chatMsgs">
+          <div class="cmsg">
+            <div class="cav ai">AI</div>
+            <div class="cbub">Hello! I can help you build geospatial processing workflows. Describe what you'd like to do with your point cloud data.</div>
+          </div>
+          <div class="cmsg user">
+            <div class="cav usr">You</div>
+            <div class="cbub user">Remove noise from my road survey scan, classify the ground points, detect all road markings and traffic signs, then export as GeoJSON.</div>
+          </div>
+          <div class="cmsg">
+            <div class="cav ai">AI</div>
+            <div class="cbub">
+              <strong>Planning your workflow...</strong><br><br>
+              I've identified <strong>5 processing steps</strong> for your road survey pipeline:<br><br>
+              <span class="step">1. Read from S3 (LAS/LAZ input)</span>
+              <span class="step">2. PDAL Noise Filter — Statistical Outlier Removal</span>
+              <span class="step">3. PDAL Ground Classifier — SMRF algorithm</span>
+              <span class="step">4. Road Marking Extraction — OpenPCDet</span>
+              <span class="step">5. GeoJSON Export to S3</span>
+              <div class="done-line">Workflow generated and ready to deploy</div>
+            </div>
+          </div>
+        </div>
+        <div class="qprompts">
+          <button class="qp" onclick="loadPrompt('floor')">Floor Plan</button>
+          <button class="qp" onclick="loadPrompt('drains')">Road Drains</button>
+          <button class="qp" onclick="loadPrompt('geo')">Georeference</button>
+          <button class="qp" onclick="loadPrompt('dtm')">Generate DTM</button>
+        </div>
+        <div class="chat-input-row">
+          <input type="text" class="chat-input" id="chatInput" placeholder="Describe your processing task..." />
+          <button class="chat-send-btn" onclick="sendChat()">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M7 2.5l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Workflow output -->
+      <div class="panel">
+        <div class="panel-bar">
+          <span class="panel-bar-title">Auto-Generated n8n Workflow</span>
+          <span class="panel-bar-tag">Generated Output</span>
+        </div>
+        <div class="wf-area">
+          <div class="wf-top">
+            <span class="wf-name" id="wfName">Road Survey Pipeline</span>
+            <div class="wf-actions">
+              <span class="wf-status" id="wfStatus">Ready</span>
+              <button class="wf-deploy">Deploy</button>
+            </div>
+          </div>
+          <div class="wf-nodes" id="wfNodes">
+            <div class="wf-node"><div class="wf-node-ico">📥</div><div class="wf-node-n">S3 Read</div><div class="wf-node-l">PDAL</div></div>
+            <div class="wf-arr"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3.5l3.5 3.5L8 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="wf-node"><div class="wf-node-ico">🔇</div><div class="wf-node-n">Noise Filter</div><div class="wf-node-l">PDAL</div></div>
+            <div class="wf-arr"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3.5l3.5 3.5L8 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="wf-node"><div class="wf-node-ico">🌍</div><div class="wf-node-n">Ground Classify</div><div class="wf-node-l">PDAL SMRF</div></div>
+            <div class="wf-arr"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3.5l3.5 3.5L8 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="wf-node"><div class="wf-node-ico">🛣️</div><div class="wf-node-n">Road Markings</div><div class="wf-node-l">OpenPCDet</div></div>
+            <div class="wf-arr"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3.5l3.5 3.5L8 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="wf-node"><div class="wf-node-ico">📤</div><div class="wf-node-n">GeoJSON Export</div><div class="wf-node-l">S3 Writer</div></div>
+          </div>
+          <div class="json-box">
+            <div class="json-box-hd">Generated JSON (excerpt)</div>
+            <pre id="jsonPre"><span class="jk">{</span>
+  <span class="jk">"name":</span> <span class="js">"Road Survey Pipeline"</span>,
+  <span class="jk">"nodes":</span> [
+    { <span class="jk">"type":</span> <span class="js">"n8n-nodes-geospatial.PdalRead"</span>,
+      <span class="jk">"parameters":</span> { <span class="jk">"source":</span> <span class="js">"s3://bucket/scan.laz"</span> } },
+    { <span class="jk">"type":</span> <span class="js">"n8n-nodes-geospatial.PdalFilter"</span>,
+      <span class="jk">"parameters":</span> { <span class="jk">"filter":</span> <span class="js">"outlier"</span> } }
+    <span class="jc">// ... 3 more nodes</span>
+  ]
+<span class="jk">}</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5 Stages -->
+    <div style="margin-top: 52px;">
+      <div class="sec-head center">
+        <h3 class="sec-title" style="font-size:22px;">How the Agent Works — 5 Stages</h3>
+        <p class="sec-desc">Every natural language request passes through a deterministic LangGraph pipeline that guarantees valid, deployable output.</p>
+      </div>
+      <div class="stages">
+        <div class="stage"><div class="stage-n">01</div><div class="stage-t">Intent Router</div><div class="stage-d">Classifies the message as a workflow request, data query, or general chat. Routes to the correct downstream handler without ambiguity.</div></div>
+        <div class="stage"><div class="stage-n">02</div><div class="stage-t">Workflow Planner</div><div class="stage-d">Breaks the request into 3–7 ordered processing steps using a structured chain-of-thought prompt. Each step is named, typed, and given a clear purpose.</div></div>
+        <div class="stage"><div class="stage-n">03</div><div class="stage-t">Node Selector</div><div class="stage-d">Uses pgvector semantic search across the 30+ node library to find the exact right n8n node for each planned step. Retrieval-augmented, not hallucinated.</div></div>
+        <div class="stage"><div class="stage-n">04</div><div class="stage-t">JSON Generator</div><div class="stage-d">Constructs the complete n8n workflow JSON with Pydantic-enforced schema validation. Invalid workflows are automatically corrected before output.</div></div>
+        <div class="stage"><div class="stage-n">05</div><div class="stage-t">Deployer & Publisher</div><div class="stage-d">Pushes the workflow to the n8n REST API and offers to add it to the viewer toolbar as a one-click tool for non-technical users.</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="div" />
+
+<!-- SYSTEM 2 -->
+<section id="system2">
+  <div class="container">
+    <div class="eyebrow">
+      <span class="eyebrow-dot"></span>
+      System 2
+    </div>
+    <div class="sec-head">
+      <h2 class="sec-title">Workflow-as-Tool<br><span>Viewer Registry</span></h2>
+      <p class="sec-desc">Pre-built and AI-generated workflows appear as one-click buttons directly in the 3D viewer. Non-technical users can run complex processing pipelines without ever leaving the visualization interface.</p>
+    </div>
+
+    <!-- Viewer mockup -->
+    <div class="viewer-shell">
+      <div class="viewer-tb">
+        <div class="vdots"><div class="vdot"></div><div class="vdot"></div><div class="vdot"></div></div>
+        <span class="vfile">Brisbane_CBD_Survey_2026.copc.laz — Streaming</span>
+        <span class="vmeta">42.3M pts · LOD 6/8</span>
+      </div>
+      <div class="viewer-body">
+        <div class="viewer-canvas">
+          <canvas class="pc-canvas" id="pcCanvas"></canvas>
+          <div class="v-overlay-tl">
+            <div class="v-badge">CesiumJS + Potree · COPC · CloudFront CDN</div>
+          </div>
+          <div class="v-overlay-tr">
+            <div class="v-result">847 road markings detected</div>
+            <div class="v-result">23 traffic signs classified</div>
+          </div>
+          <div class="v-controls">
+            <button class="v-ctrl">View</button>
+            <button class="v-ctrl">Orbit</button>
+            <button class="v-ctrl">Measure</button>
+            <button class="v-ctrl">Clip</button>
+          </div>
+          <div class="v-tech">COPC · HTTP Range · S3</div>
+        </div>
+        <div class="vsidebar">
+          <div class="vsec">
+            <div class="vsec-title">Tools</div>
+            <div class="tool-grid">
+              <button class="tbtn active" onclick="selectTool(this,'roads')">Prepare <span class="tstat done">✓</span></button>
+              <button class="tbtn active" onclick="selectTool(this,'roads')">Roads <span class="tstat done">✓</span></button>
+              <button class="tbtn running" onclick="selectTool(this,'floor')">Floor Plan <span class="tstat run"></span></button>
+              <button class="tbtn" onclick="selectTool(this,'dtm')">DTM</button>
+              <button class="tbtn" onclick="selectTool(this,'report')">Report</button>
+            </div>
+            <button class="tadd" onclick="scrollToChat()">+ Add with AI</button>
+          </div>
+          <div class="vdetail" id="vdetail">
+            <div class="vd-name">Detect Road Assets</div>
+            <div class="vd-desc">Automatically detects and classifies road markings, traffic signs, kerbs, drains, and manholes. Outputs GeoJSON feature collection.</div>
+            <div class="vd-field"><label class="vd-label">Confidence Threshold</label><input type="number" class="vd-input" value="0.75" min="0" max="1" step="0.05" /></div>
+            <div class="vd-field"><label class="vd-label">Asset Classes</label><select class="vd-input"><option>All Assets</option><option>Road Markings Only</option><option>Traffic Signs Only</option><option>Drainage Assets</option></select></div>
+            <div class="vd-field"><label class="vd-label">Output Format</label><select class="vd-input"><option>GeoJSON</option><option>Shapefile</option><option>CSV + WKT</option></select></div>
+            <div class="vd-progress"><div class="vd-fill" style="width:100%"></div></div>
+            <div class="vd-plabel">Complete</div>
+            <button class="vd-run">Run Again</button>
+            <div class="vd-result">847 road markings · 23 traffic signs · 12 drains<br>GeoJSON exported to S3</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pre-built tools -->
+    <div style="margin-top: 52px;">
+      <div class="sec-head center">
+        <h3 class="sec-title" style="font-size:22px;">5 Pre-Built System Tools</h3>
+        <p class="sec-desc">Every platform deployment ships with these tools pre-configured. Additional tools can be added by the AI agent or created manually.</p>
+      </div>
+      <div class="tools-grid">
+        <div class="tcard"><div class="tcard-ico">⚡</div><div class="tcard-name">Prepare for Viewing</div><div class="tcard-desc">Converts raw LAS/LAZ to COPC format with optimised octree structure for progressive LOD streaming via HTTP Range requests.</div><div class="tcard-tags"><span class="tag">PDAL</span><span class="tag">COPC</span><span class="tag">S3</span></div></div>
+        <div class="tcard"><div class="tcard-ico">🛣️</div><div class="tcard-name">Detect Road Assets</div><div class="tcard-desc">Detects and classifies road markings, traffic signs, kerbs, drains, and manholes. Outputs a GeoJSON feature collection with asset types and locations.</div><div class="tcard-tags"><span class="tag">OpenPCDet</span><span class="tag">GeoJSON</span></div></div>
+        <div class="tcard"><div class="tcard-ico">🏢</div><div class="tcard-name">Extract Floor Plan</div><div class="tcard-desc">Segments walls, slabs, doors, and windows from indoor scan data. Exports IFC 4 BIM model and DXF floor plan using Cloud2BIM pipeline.</div><div class="tcard-tags"><span class="tag">Cloud2BIM</span><span class="tag">IFC 4</span><span class="tag">DXF</span></div></div>
+        <div class="tcard"><div class="tcard-ico">🗻</div><div class="tcard-name">Generate DTM</div><div class="tcard-desc">Classifies ground points using SMRF algorithm and interpolates a Digital Terrain Model at configurable resolution. Exports GeoTIFF.</div><div class="tcard-tags"><span class="tag">PDAL</span><span class="tag">GDAL</span><span class="tag">GeoTIFF</span></div></div>
+        <div class="tcard"><div class="tcard-ico">📊</div><div class="tcard-name">Generate Asset Report</div><div class="tcard-desc">Produces a structured PDF and GeoJSON inventory of all detected assets with counts, classifications, coordinates, and confidence scores.</div><div class="tcard-tags"><span class="tag">PostGIS</span><span class="tag">PDF</span><span class="tag">GeoJSON</span></div></div>
+        <div class="tcard add" onclick="scrollToChat()"><div class="add-ico">+</div><div class="add-t">Add Tool with AI</div><div class="add-d">Describe a new workflow in natural language. The AI agent generates it and adds it to this toolbar automatically.</div></div>
+      </div>
+    </div>
+
+    <!-- Dynamic registry -->
+    <div style="margin-top: 52px;">
+      <div class="sec-head center">
+        <h3 class="sec-title" style="font-size:22px;">Tools Appear Automatically</h3>
+        <p class="sec-desc">The viewer toolbar is driven entirely by the <code style="font-size:12px;color:var(--secondary);background:var(--bg-3);padding:1px 6px;border-radius:4px;border:1px solid var(--border)">workflow_tools</code> database table. When the AI agent publishes a new workflow, it appears in the toolbar immediately — no frontend code changes required.</p>
+      </div>
+      <div class="reg-grid">
+        <div class="code-panel">
+          <div class="code-panel-hd">
+            <span class="code-panel-title">workflow_tools — Supabase</span>
+            <span class="code-panel-lang">SQL</span>
+          </div>
+          <pre><span class="cc">-- Query published tools for an org</span>
+<span class="ck">SELECT</span> id, name, icon,
+       description,
+       required_inputs,
+       n8n_workflow_id
+<span class="ck">FROM</span>   workflow_tools
+<span class="ck">WHERE</span>  organization_id = <span class="cs">'org_xyz'</span>
+  <span class="ck">AND</span>  is_published = <span class="ck">true</span>
+<span class="ck">ORDER BY</span> sort_order;</pre>
+        </div>
+        <div class="code-panel">
+          <div class="code-panel-hd">
+            <span class="code-panel-title">required_inputs schema example</span>
+            <span class="code-panel-lang">JSON</span>
+          </div>
+          <pre><span class="cc">// Drives the viewer UI automatically</span>
+{
+  <span class="cs">"confidence"</span>: {
+    <span class="cs">"type"</span>: <span class="cs">"number"</span>,
+    <span class="cs">"label"</span>: <span class="cs">"Confidence Threshold"</span>,
+    <span class="cs">"default"</span>: 0.75,
+    <span class="cs">"range"</span>: [0, 1]
+  },
+  <span class="cs">"area"</span>: {
+    <span class="cs">"type"</span>: <span class="cs">"spatial_polygon"</span>,
+    <span class="cs">"label"</span>: <span class="cs">"Processing Area"</span>
+  }
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="div" />
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="container">
+    <div class="eyebrow"><span class="eyebrow-dot"></span>Architecture</div>
+    <div class="sec-head center">
+      <h2 class="sec-title">How the Two Systems Connect</h2>
+      <p class="sec-desc">Natural language input flows through the LangGraph agent, generates an n8n workflow, and surfaces as a viewer tool — all in a single coherent pipeline.</p>
+    </div>
+    <div class="arch">
+      <div class="arch-layer"><div class="arch-hd"><div class="arch-num">1</div><div class="arch-name">User Interface Layer</div></div><div class="arch-body"><span class="arch-chip">Chat Panel (NL Input)</span><span class="arch-chip">3D Viewer — CesiumJS + Potree</span><span class="arch-chip">Viewer Toolbar (Tool Registry)</span></div></div>
+      <div class="arch-arr"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3v12M5 11l4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="arch-layer"><div class="arch-hd"><div class="arch-num">2</div><div class="arch-name">Agentic AI Layer — LangGraph</div></div><div class="arch-body"><span class="arch-chip">Intent Router</span><span class="arch-chip">Workflow Planner</span><span class="arch-chip">Node Selector (pgvector)</span><span class="arch-chip">JSON Generator</span><span class="arch-chip">Deployer</span></div></div>
+      <div class="arch-arr"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3v12M5 11l4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="arch-layer"><div class="arch-hd"><div class="arch-num">3</div><div class="arch-name">Workflow Orchestration Layer</div></div><div class="arch-body"><span class="arch-chip">n8n Workflow Engine</span><span class="arch-chip">Geospatial Node Library (30+ nodes)</span><span class="arch-chip">Argo Workflows (Kubernetes)</span><span class="arch-chip">KEDA Autoscaler</span></div></div>
+      <div class="arch-arr"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3v12M5 11l4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="arch-layer"><div class="arch-hd"><div class="arch-num">4</div><div class="arch-name">Processing Workers</div></div><div class="arch-body"><span class="arch-chip">PDAL — Tiling, Filtering</span><span class="arch-chip">Cloud2BIM — Scan-to-BIM</span><span class="arch-chip">OpenPCDet — Road Assets</span><span class="arch-chip">FlexCloud — Georeferencing</span><span class="arch-chip">GDAL — Raster</span></div></div>
+      <div class="arch-arr"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3v12M5 11l4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="arch-layer"><div class="arch-hd"><div class="arch-num">5</div><div class="arch-name">Data &amp; Storage Layer</div></div><div class="arch-body"><span class="arch-chip">S3 + CloudFront (COPC)</span><span class="arch-chip">PostgreSQL + PostGIS</span><span class="arch-chip">pgvector (Embeddings)</span><span class="arch-chip">SQS (Job Queue)</span></div></div>
+    </div>
+  </div>
+</section>
+
+<hr class="div" />
+
+<!-- NODE LIBRARY -->
+<section id="nodes">
+  <div class="container">
+    <div class="eyebrow"><span class="eyebrow-dot"></span>Node Library</div>
+    <div class="sec-head center">
+      <h2 class="sec-title">30+ Geospatial<br><span>Processing Nodes</span></h2>
+      <p class="sec-desc">Every node wraps a battle-tested open source library and is available to the AI agent for workflow generation and to non-technical users as viewer tools.</p>
+    </div>
+    <div class="ntable-wrap">
+      <table class="ntable">
+        <thead>
+          <tr>
+            <th>Node Category</th>
+            <th>Nodes</th>
+            <th>Library</th>
+            <th>NL</th>
+            <th>Viewer</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Point Cloud I/O</td><td>Read S3, Write COPC, Write LAS/LAZ</td><td><span class="ltag">PDAL</span></td><td><span class="ck2">✓</span></td><td><span class="ck2">✓</span></td></tr>
+          <tr><td>Filtering &amp; Cleaning</td><td>Noise Remove, Decimate, Crop, Voxel Grid</td><td><span class="ltag">PDAL</span></td><td><span class="ck2">✓</span></td><td><span class="ck2">✓</span></td></tr>
+          <tr><td>Classification</td><td>Ground (SMRF), Vegetation, Buildings</td><td><span class="ltag">PDAL</span> <span class="ltag">RandLA-Net</span></td><td><span class="ck2">✓</span></td><td><span class="ck2">✓</span></td></tr>
+          <tr><td>Georeferencing</td><td>GCP Transform, Reproject, SLAM Correct</td><td><span class="ltag">PDAL</span> <span class="ltag">FlexCloud</span></td><td><span class="ck2">✓</span></td><td><span class="ck2">✓</span></td></tr>
+          <tr><td>Road Asset Detection</td><td>Road Markings, Traffic Signs, Drains</td><td><span class="ltag">OpenPCDet</span></td><td><span class="ck2">✓</span></td><td><span class="ck2">✓</span></td></tr>
+          <tr><td>BIM / CAD Extraction</td><td>Wall Detect, Room Segment, IFC Export, DXF</td><td><span class="ltag">Cloud2BIM</span> <span class="ltag">ezdxf</span></td><td><span class="ck2">✓</span></td><td><span class="ck2">✓</span></td></tr>
+          <tr><td>Raster Generation</td><td>DTM, DSM, Intensity Map, Hillshade</td><td><span class="ltag">PDAL</span> <span class="ltag">GDAL</span></td><td><span class="ck2">✓</span></td><td><span class="ck2">✓</span></td></tr>
+          <tr><td>Vector Operations</td><td>Buffer, Clip, Dissolve, Simplify, Reproject</td><td><span class="ltag">GeoPandas</span> <span class="ltag">Turf.js</span></td><td><span class="ck2">✓</span></td><td><span class="cp">~</span></td></tr>
+          <tr><td>Database</td><td>PostGIS Query, Insert Features, Spatial Index</td><td><span class="ltag">PostGIS</span></td><td><span class="ck2">✓</span></td><td><span class="cp">~</span></td></tr>
+          <tr><td>Notifications</td><td>Email, Webhook, Slack, SMS</td><td><span class="ltag">n8n built-in</span></td><td><span class="ck2">✓</span></td><td><span class="cd">—</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<hr class="div" />
+
+<!-- CTA -->
+<section id="cta">
+  <div class="container">
+    <div class="eyebrow" style="display:inline-flex;position:relative;left:50%;transform:translateX(-50%);">
+      <span class="eyebrow-dot"></span>Open Source
+    </div>
+    <div class="sec-head center">
+      <h2 class="sec-title">Ready to Build?</h2>
+      <p class="sec-desc">The complete platform scaffold, PRDs, architecture diagrams, and vibe coding prompts are all in the GitHub repository. Clone and start building today.</p>
+    </div>
+    <div class="cta-btns">
+      <a href="https://github.com/darce-radic/pointcloud-platform" target="_blank" class="btn-w">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1C3.462 1 1 3.462 1 6.5c0 2.426 1.573 4.486 3.756 5.212.275.05.375-.119.375-.265 0-.13-.005-.475-.007-.933-1.53.332-1.852-.738-1.852-.738-.25-.635-.61-.804-.61-.804-.499-.341.038-.334.038-.334.552.039.842.567.842.567.49.84 1.286.598 1.6.457.05-.355.192-.598.349-.735-1.22-.139-2.503-.61-2.503-2.715 0-.6.214-1.09.566-1.474-.057-.139-.245-.697.053-1.453 0 0 .461-.148 1.51.563A5.26 5.26 0 016.5 4.37c.467.002.936.063 1.375.185 1.048-.71 1.508-.563 1.508-.563.3.756.111 1.314.055 1.453.353.384.565.874.565 1.474 0 2.11-1.285 2.574-2.509 2.71.197.17.373.505.373 1.018 0 .736-.007 1.329-.007 1.51 0 .147.099.32.378.265C11.428 10.984 13 8.924 13 6.5 13 3.462 10.538 1 6.5 1z" fill="currentColor"/></svg>
+        View on GitHub
+      </a>
+      <a href="#system1" class="btn-g">See the Demo</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="container">
+  <div class="fl">PointCloud Platform — Open Source · MIT License</div>
+  <div class="flinks">
+    <a href="https://github.com/darce-radic/pointcloud-platform" target="_blank">GitHub</a>
+    <a href="https://github.com/darce-radic/pointcloud-platform/blob/main/docs/prd/Platform_PRD_Final.md" target="_blank">Docs</a>
+    <a href="https://github.com/darce-radic/pointcloud-platform/blob/main/VIBE_CODING_STARTER_PROMPT.md" target="_blank">Vibe Coding</a>
+  </div>
+</footer>
+
+<script>
+/* ── Point cloud canvas simulation ── */
+(function() {
+  const canvas = document.getElementById('pcCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H, pts = [];
+  function resize() {
+    W = canvas.width = canvas.offsetWidth;
+    H = canvas.height = canvas.offsetHeight;
+  }
+  function initPts() {
+    pts = [];
+    const n = Math.floor((W * H) / 2200);
+    for (let i = 0; i < n; i++) {
+      pts.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.2 + 0.3,
+        a: Math.random() * 0.55 + 0.08,
+        vx: (Math.random() - 0.5) * 0.08,
+        vy: (Math.random() - 0.5) * 0.08,
+      });
+    }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of pts) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${p.a})`;
+      ctx.fill();
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0) p.x = W;
+      if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H;
+      if (p.y > H) p.y = 0;
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); initPts(); draw();
+  window.addEventListener('resize', () => { resize(); initPts(); });
+})();
+
+/* ── Chat prompts ── */
+const prompts = {
+  floor: {
+    user: 'Extract a floor plan and IFC BIM model from my indoor building scan.',
+    ai: '<strong>Planning your workflow...</strong><br><br>I\'ve identified <strong>4 processing steps</strong> for your floor plan pipeline:<br><br><span class="step">1. Read from S3 (LAS/LAZ input)</span><span class="step">2. PDAL Noise Filter — Statistical Outlier Removal</span><span class="step">3. Cloud2BIM — Wall, Door &amp; Room Segmentation</span><span class="step">4. IFC 4 + DXF Export to S3</span><div class="done-line">Workflow generated and ready to deploy</div>',
+    name: 'Floor Plan Extraction',
+    nodes: [{ico:'📥',n:'S3 Read',l:'PDAL'},{ico:'🔇',n:'Noise Filter',l:'PDAL'},{ico:'🏢',n:'BIM Segment',l:'Cloud2BIM'},{ico:'📐',n:'IFC Export',l:'ezdxf'}]
+  },
+  drains: {
+    user: 'Detect all road drains, manholes, and kerb inlets from my road survey scan.',
+    ai: '<strong>Planning your workflow...</strong><br><br>I\'ve identified <strong>4 processing steps</strong> for your drainage detection pipeline:<br><br><span class="step">1. Read from S3 (LAS/LAZ input)</span><span class="step">2. PDAL Ground Classification — SMRF</span><span class="step">3. DTM Generation — Local Minima Analysis</span><span class="step">4. Drain Detection + GeoJSON Export</span><div class="done-line">Workflow generated and ready to deploy</div>',
+    name: 'Drainage Detection Pipeline',
+    nodes: [{ico:'📥',n:'S3 Read',l:'PDAL'},{ico:'🌍',n:'Ground Classify',l:'PDAL SMRF'},{ico:'🗻',n:'DTM Generate',l:'GDAL'},{ico:'🕳️',n:'Drain Detect',l:'OpenPCDet'}]
+  },
+  geo: {
+    user: 'Georeference my SLAM point cloud using known GCP coordinates.',
+    ai: '<strong>Planning your workflow...</strong><br><br>I\'ve identified <strong>3 processing steps</strong> for your georeferencing pipeline:<br><br><span class="step">1. Read from S3 (LAS/LAZ input)</span><span class="step">2. FlexCloud — SLAM Drift Correction with GCPs</span><span class="step">3. PDAL Reproject — Output to EPSG:4326</span><div class="done-line">Workflow generated and ready to deploy</div>',
+    name: 'SLAM Georeferencing Pipeline',
+    nodes: [{ico:'📥',n:'S3 Read',l:'PDAL'},{ico:'📍',n:'GCP Align',l:'FlexCloud'},{ico:'🌐',n:'Reproject',l:'PDAL'},{ico:'📤',n:'LAZ Export',l:'S3 Writer'}]
+  },
+  dtm: {
+    user: 'Generate a Digital Terrain Model from my outdoor survey scan.',
+    ai: '<strong>Planning your workflow...</strong><br><br>I\'ve identified <strong>4 processing steps</strong> for your DTM pipeline:<br><br><span class="step">1. Read from S3 (LAS/LAZ input)</span><span class="step">2. PDAL Noise Filter</span><span class="step">3. PDAL Ground Classification — SMRF</span><span class="step">4. GDAL DTM Interpolation — GeoTIFF Export</span><div class="done-line">Workflow generated and ready to deploy</div>',
+    name: 'DTM Generation Pipeline',
+    nodes: [{ico:'📥',n:'S3 Read',l:'PDAL'},{ico:'🔇',n:'Noise Filter',l:'PDAL'},{ico:'🌍',n:'Ground Classify',l:'PDAL SMRF'},{ico:'🗻',n:'DTM Export',l:'GDAL'}]
+  }
+};
+
+const arrSvg = `<div class="wf-arr"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3.5l3.5 3.5L8 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
+
+function loadPrompt(key) {
+  const p = prompts[key];
+  if (!p) return;
+  const msgs = document.getElementById('chatMsgs');
+  msgs.innerHTML = `
+    <div class="cmsg"><div class="cav ai">AI</div><div class="cbub">Hello! I can help you build geospatial processing workflows. Describe what you'd like to do with your point cloud data.</div></div>
+    <div class="cmsg user"><div class="cav usr">You</div><div class="cbub user">${p.user}</div></div>
+  `;
+  const typing = document.createElement('div');
+  typing.className = 'cmsg';
+  typing.innerHTML = `<div class="cav ai">AI</div><div class="cbub" style="color:var(--muted)">Thinking...</div>`;
+  msgs.appendChild(typing);
+  msgs.scrollTop = msgs.scrollHeight;
+  setTimeout(() => {
+    typing.remove();
+    const r = document.createElement('div');
+    r.className = 'cmsg';
+    r.innerHTML = `<div class="cav ai">AI</div><div class="cbub">${p.ai}</div>`;
+    msgs.appendChild(r);
+    msgs.scrollTop = msgs.scrollHeight;
+    updateWf(p);
+  }, 900);
+}
+
+function updateWf(p) {
+  document.getElementById('wfName').textContent = p.name;
+  document.getElementById('wfStatus').textContent = 'Ready';
+  document.getElementById('wfNodes').innerHTML = p.nodes.map((n,i) =>
+    `<div class="wf-node"><div class="wf-node-ico">${n.ico}</div><div class="wf-node-n">${n.n}</div><div class="wf-node-l">${n.l}</div></div>${i < p.nodes.length-1 ? arrSvg : ''}`
+  ).join('');
+}
+
+function sendChat() {
+  const inp = document.getElementById('chatInput');
+  const v = inp.value.trim();
+  if (!v) return;
+  const msgs = document.getElementById('chatMsgs');
+  const um = document.createElement('div');
+  um.className = 'cmsg user';
+  um.innerHTML = `<div class="cav usr">You</div><div class="cbub user">${v}</div>`;
+  msgs.appendChild(um);
+  inp.value = '';
+  const typing = document.createElement('div');
+  typing.className = 'cmsg';
+  typing.innerHTML = `<div class="cav ai">AI</div><div class="cbub" style="color:var(--muted)">Analysing your request...</div>`;
+  msgs.appendChild(typing);
+  msgs.scrollTop = msgs.scrollHeight;
+  setTimeout(() => {
+    typing.remove();
+    const r = document.createElement('div');
+    r.className = 'cmsg';
+    r.innerHTML = `<div class="cav ai">AI</div><div class="cbub"><strong>Workflow planned.</strong><br><br>I've analysed your request and identified the required processing steps. The n8n workflow JSON has been generated and is ready to deploy.<div class="done-line">Workflow generated and ready to deploy</div></div>`;
+    msgs.appendChild(r);
+    msgs.scrollTop = msgs.scrollHeight;
+  }, 1100);
+}
+
+document.getElementById('chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+
+/* ── Tool selection ── */
+const toolData = {
+  roads: { name:'Detect Road Assets', desc:'Automatically detects and classifies road markings, traffic signs, kerbs, drains, and manholes. Outputs GeoJSON feature collection.', progress:100, result:'847 road markings · 23 traffic signs · 12 drains\nGeoJSON exported to S3' },
+  floor: { name:'Extract Floor Plan', desc:'Segments walls, slabs, doors, and windows from indoor scan data. Exports IFC 4 BIM model and DXF floor plan using Cloud2BIM.', progress:65, result:null },
+  dtm:   { name:'Generate DTM', desc:'Classifies ground points using SMRF algorithm and interpolates a Digital Terrain Model at configurable resolution. Exports GeoTIFF.', progress:0, result:null },
+  report:{ name:'Generate Asset Report', desc:'Produces a structured PDF and GeoJSON inventory of all detected assets with counts, classifications, coordinates, and confidence scores.', progress:0, result:null }
+};
+
+function selectTool(btn, key) {
+  const d = toolData[key];
+  if (!d) return;
+  document.getElementById('vdetail').innerHTML = `
+    <div class="vd-name">${d.name}</div>
+    <div class="vd-desc">${d.desc}</div>
+    <div class="vd-field"><label class="vd-label">Confidence Threshold</label><input type="number" class="vd-input" value="0.75" min="0" max="1" step="0.05" /></div>
+    <div class="vd-field"><label class="vd-label">Asset Classes</label><select class="vd-input"><option>All Assets</option><option>Road Markings Only</option><option>Traffic Signs Only</option><option>Drainage Assets</option></select></div>
+    <div class="vd-field"><label class="vd-label">Output Format</label><select class="vd-input"><option>GeoJSON</option><option>Shapefile</option><option>CSV + WKT</option></select></div>
+    <div class="vd-progress"><div class="vd-fill" id="vdfill" style="width:${d.progress}%"></div></div>
+    <div class="vd-plabel" id="vdplabel">${d.progress===100?'Complete':d.progress>0?'Processing...':'Ready to run'}</div>
+    <button class="vd-run" onclick="runTool()">Run${d.progress===100?' Again':''}</button>
+    ${d.result ? `<div class="vd-result">${d.result}</div>` : ''}
+  `;
+}
+
+function runTool() {
+  const fill = document.getElementById('vdfill');
+  const label = document.getElementById('vdplabel');
+  if (!fill || !label) return;
+  let pct = 0; fill.style.width = '0%'; label.textContent = 'Processing...';
+  const iv = setInterval(() => {
+    pct = Math.min(pct + Math.random() * 7 + 2, 100);
+    fill.style.width = pct + '%';
+    if (pct >= 100) { clearInterval(iv); label.textContent = 'Complete'; }
+  }, 120);
+}
+
+function scrollToChat() {
+  document.getElementById('system1').scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+</body>
+</html>

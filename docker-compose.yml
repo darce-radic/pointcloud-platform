@@ -1,0 +1,204 @@
+version: "3.9"
+
+# ── PointCloud Platform — Local Development Stack ─────────────────────────────
+#
+# Services:
+#   api           — FastAPI backend (port 8000)
+#   frontend      — Vite + React frontend (port 5173)
+#   worker-tiling — PDAL COPC tiling worker
+#   worker-bim    — BIM extraction worker (Cloud2BIM + IfcOpenShell)
+#   worker-road   — Road asset extraction worker (OpenPCDet)
+#   n8n           — Workflow automation (port 5678)
+#   redis         — Cache and future job broker (port 6379)
+#   localstack    — Local AWS S3 + SQS emulator (port 4566)
+#
+# Usage:
+#   cp .env.example .env && fill in values
+#   docker-compose up api frontend n8n redis localstack
+#   docker-compose up worker-tiling worker-bim worker-road  (separate terminal)
+
+networks:
+  platform:
+    driver: bridge
+
+volumes:
+  n8n_data:
+  redis_data:
+  localstack_data:
+
+services:
+
+  # ── FastAPI Backend ─────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api:/app
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pointcloud-platform}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/processing-jobs.fifo}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      N8N_API_URL: http://n8n:5678
+      N8N_API_KEY: ${N8N_API_KEY:-changeme}
+      APP_DOMAIN: ${APP_DOMAIN:-http://localhost:5173}
+      ENVIRONMENT: development
+      ARGO_SERVER_URL: ${ARGO_SERVER_URL:-http://localhost:2746}
+      ARGO_TOKEN: ${ARGO_TOKEN:-}
+      ARGO_NAMESPACE: ${ARGO_NAMESPACE:-processing}
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - platform
+    depends_on:
+      - n8n
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── React Frontend ──────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_SUPABASE_URL: ${SUPABASE_URL}
+      VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      VITE_API_URL: http://localhost:8000
+    command: pnpm dev --host
+    networks:
+      - platform
+
+  # ── PDAL Tiling Worker ──────────────────────────────────────────────────────
+  worker-tiling:
+    build:
+      context: ./workers/tiling
+      dockerfile: Dockerfile
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pointcloud-platform}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/processing-jobs.fifo}
+    networks:
+      - platform
+    restart: unless-stopped
+
+  # ── BIM Extraction Worker ───────────────────────────────────────────────────
+  worker-bim:
+    build:
+      context: ./workers/bim-extraction
+      dockerfile: Dockerfile
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pointcloud-platform}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/processing-jobs.fifo}
+    networks:
+      - platform
+    restart: unless-stopped
+
+  # ── Road Assets Worker (GPU) ────────────────────────────────────────────────
+  worker-road:
+    build:
+      context: ./workers/road-assets
+      dockerfile: Dockerfile
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pointcloud-platform}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/processing-jobs.fifo}
+      OPENPCDET_MODEL_PATH: /models/pointpillars_traffic_signs.pth
+    # Uncomment for GPU access on a CUDA-capable host:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    networks:
+      - platform
+    restart: unless-stopped
+
+  # ── n8n Workflow Automation ─────────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:1.70.3
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-changeme}
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678
+      GENERIC_TIMEZONE: UTC
+      N8N_PUBLIC_API_DISABLED: "false"
+      N8N_API_KEY: ${N8N_API_KEY:-changeme}
+      N8N_COMMUNITY_PACKAGES_ENABLED: "true"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - platform
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - platform
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── LocalStack (local AWS S3 + SQS for development) ─────────────────────────
+  localstack:
+    image: localstack/localstack:3.0
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,sqs
+      DEFAULT_REGION: us-east-1
+      PERSISTENCE: 1
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh
+    networks:
+      - platform

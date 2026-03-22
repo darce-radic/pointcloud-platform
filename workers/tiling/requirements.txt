@@ -1,0 +1,5 @@
+# Tiling Worker Dependencies
+pdal==3.4.5
+boto3==1.35.80
+supabase==2.10.0
+numpy==1.26.4
