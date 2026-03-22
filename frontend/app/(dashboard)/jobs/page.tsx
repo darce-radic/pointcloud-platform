@@ -68,7 +68,7 @@ export default async function JobsPage() {
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-[#666] text-sm">
-                      {(job.datasets as { name: string } | null)?.name ?? '—'}
+                      {(job.datasets as unknown as { name: string } | null)?.name ?? '—'}
                     </span>
                   </td>
                   <td className="px-6 py-4">

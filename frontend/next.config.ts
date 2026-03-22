@@ -8,10 +8,8 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: '*.cloudfront.net' },
     ],
   },
-  webpack: (config) => {
-    config.experiments = { ...config.experiments, asyncWebAssembly: true }
-    return config
-  },
+  // Next.js 16 uses Turbopack by default
+  turbopack: {},
 };
 
 export default nextConfig;

@@ -21,7 +21,8 @@ interface WorkflowTool {
   name: string
   description: string
   icon: string
-  required_inputs: Record<string, unknown>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  required_inputs: Record<string, any>
   n8n_workflow_id: string
 }
 
@@ -74,9 +75,9 @@ export default function ViewerClient({ dataset, workflowTools }: ViewerClientPro
       Viewer: new (el: HTMLElement) => {
         setEDLEnabled: (v: boolean) => void
         setBackground: (v: string) => void
-        loadPointCloud: (url: string, name: string, cb: (e: { pointcloud: unknown }) => void) => void
         scene: { addPointCloud: (pc: unknown) => void; view: { position: { set: (x: number, y: number, z: number) => void }; lookAt: { set: (x: number, y: number, z: number) => void } } }
       }
+      loadPointCloud: (url: string, name: string, cb: (e: { pointcloud: unknown }) => void) => void
     }
 
     if (!Potree) return

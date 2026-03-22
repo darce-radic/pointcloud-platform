@@ -25,7 +25,7 @@ export default async function DashboardLayout({
     <div className="flex h-screen bg-black text-white overflow-hidden">
       <Sidebar
         user={{ email: data.claims.email as string, id: data.claims.sub }}
-        organization={orgMember?.organizations as { id: string; name: string; slug: string } | null}
+        organization={orgMember?.organizations as unknown as { id: string; name: string; slug: string } | null}
       />
       <main className="flex-1 overflow-auto">
         {children}
