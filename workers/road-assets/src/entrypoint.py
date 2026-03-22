@@ -5,24 +5,24 @@ Extracts and classifies:
   - Road markings (lines, arrows, crosswalks) via intensity-based segmentation
   - Traffic signs (detection + type classification via PointPillars/OpenPCDet)
   - Road drains and manholes (DTM local minima analysis)
-  - Kerb lines (height discontinuity detection)
-  - Vegetation encroachment zones
 
 Pipeline:
-  1. Download LAZ/COPC from S3
-  2. PDAL pre-processing (ground classification, DTM generation)
-  3. Road surface extraction (intensity + planarity filtering)
-  4. Road marking vectorization (RoadMarkingExtraction algorithm)
-  5. Traffic sign detection (OpenPCDet PointPillars model)
-  6. Drain/manhole detection (DTM local minima)
-  7. Export to GeoJSON + PostGIS
-  8. Upload to S3 and update Supabase
+  1. Poll Supabase `processing_jobs` for status='queued' and job_type='road_asset_extraction'
+  2. Claim the job atomically (status → 'processing')
+  3. Download LAZ/COPC from Cloudflare R2
+  4. PDAL pre-processing (ground classification, DTM generation)
+  5. Road surface extraction (intensity + planarity filtering)
+  6. Road marking vectorization
+  7. Traffic sign detection (OpenPCDet PointPillars model or geometric fallback)
+  8. Drain/manhole detection (DTM local minima)
+  9. Export to GeoJSON, upload to R2, update Supabase
 
 Environment variables required:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-  AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME
-  SQS_QUEUE_URL
-  OPENPCDET_MODEL_PATH (optional, defaults to bundled PointPillars weights)
+  R2_ENDPOINT_URL, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME
+  R2_PUBLIC_BASE_URL
+  POLL_INTERVAL_SECONDS  (default: 10)
+  OPENPCDET_MODEL_PATH   (optional, defaults to /models/pointpillars_traffic_signs.pth)
 """
 from __future__ import annotations
 
@@ -31,63 +31,137 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 
 import boto3
+from botocore.config import Config
 import numpy as np
 import pdal
 from scipy import ndimage
 from scipy.spatial import cKDTree
-from shapely.geometry import LineString, Point, Polygon, mapping
+from shapely.geometry import mapping
 from shapely.ops import unary_union
 from supabase import create_client, Client
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 log = logging.getLogger("road-assets-worker")
 
-# ── Environment ───────────────────────────────────────────────────────────────
+# ── Configuration ─────────────────────────────────────────────────────────────
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-S3_BUCKET = os.environ["S3_BUCKET_NAME"]
-SQS_URL = os.environ["SQS_QUEUE_URL"]
+R2_ENDPOINT = os.environ["R2_ENDPOINT_URL"]
+R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY_ID"]
+R2_SECRET_KEY = os.environ["R2_SECRET_ACCESS_KEY"]
+R2_BUCKET = os.environ["R2_BUCKET_NAME"]
+R2_PUBLIC_BASE = os.environ.get(
+    "R2_PUBLIC_BASE_URL",
+    "https://pub-32e459203a854e7d92911da4f9a573c8.r2.dev",
+).rstrip("/")
+POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
 MODEL_PATH = os.environ.get("OPENPCDET_MODEL_PATH", "/models/pointpillars_traffic_signs.pth")
 
+# ── Clients ───────────────────────────────────────────────────────────────────
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-s3 = boto3.client("s3", region_name=AWS_REGION)
-sqs = boto3.client("sqs", region_name=AWS_REGION)
+r2 = boto3.client(
+    "s3",
+    endpoint_url=R2_ENDPOINT,
+    aws_access_key_id=R2_ACCESS_KEY,
+    aws_secret_access_key=R2_SECRET_KEY,
+    config=Config(signature_version="s3v4"),
+    region_name="auto",
+)
 
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
 
-def update_job(job_id: str, status: str, progress: int = 0, error: Optional[str] = None):
-    update = {"status": status, "progress_pct": progress}
+def update_job(
+    job_id: str,
+    status: str,
+    progress: int = 0,
+    error: Optional[str] = None,
+    result_url: Optional[str] = None,
+) -> None:
+    payload: dict = {"status": status, "progress_pct": progress}
     if error:
-        update["error_message"] = error
+        payload["error_message"] = error[:2000]
     if status == "completed":
-        update["completed_at"] = "now()"]
-    supabase.table("processing_jobs").update(update).eq("id", job_id).execute()
-    log.info(f"Job {job_id}: {status} ({progress}%)")
+        payload["completed_at"] = "now()"
+    if result_url:
+        payload["result_url"] = result_url
+    supabase.table("processing_jobs").update(payload).eq("id", job_id).execute()
+    log.info("Job %s → %s (%d%%)", job_id, status, progress)
 
 
 def is_cancelled(job_id: str) -> bool:
-    result = supabase.table("processing_jobs").select("status").eq("id", job_id).single().execute()
+    result = (
+        supabase.table("processing_jobs")
+        .select("status")
+        .eq("id", job_id)
+        .single()
+        .execute()
+    )
     return result.data.get("status") == "cancelling"
 
 
-# ── S3 helpers ────────────────────────────────────────────────────────────────
+def claim_job() -> Optional[dict]:
+    """
+    Atomically claim one queued road_asset_extraction job.
+    Falls back to a simple poll for single-worker deployments.
+    """
+    # Fallback: simple poll (safe for single-worker deployments)
+    result = (
+        supabase.table("processing_jobs")
+        .select("*, datasets(id, name, s3_raw_key, organization_id)")
+        .eq("status", "queued")
+        .eq("job_type", "road_asset_extraction")
+        .order("created_at")
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
 
-def download_from_s3(s3_key: str, local_path: Path):
-    log.info(f"Downloading s3://{S3_BUCKET}/{s3_key} → {local_path}")
-    s3.download_file(S3_BUCKET, s3_key, str(local_path))
+    job = result.data[0]
+    job_id = job["id"]
+
+    # Atomically claim: only update if still 'queued'
+    claim = (
+        supabase.table("processing_jobs")
+        .update({"status": "processing", "progress_pct": 1})
+        .eq("id", job_id)
+        .eq("status", "queued")
+        .execute()
+    )
+    if not claim.data:
+        return None  # Another worker claimed it first
+
+    log.info("Claimed job %s", job_id)
+    return job
 
 
-def upload_to_s3(local_path: Path, s3_key: str) -> str:
-    log.info(f"Uploading {local_path} → s3://{S3_BUCKET}/{s3_key}")
-    s3.upload_file(str(local_path), S3_BUCKET, s3_key)
-    return f"s3://{S3_BUCKET}/{s3_key}"
+# ── R2 helpers ────────────────────────────────────────────────────────────────
+
+def download_from_r2(r2_key: str, local_path: Path) -> None:
+    log.info("Downloading r2://%s/%s → %s", R2_BUCKET, r2_key, local_path)
+    r2.download_file(R2_BUCKET, r2_key, str(local_path))
+
+
+def upload_to_r2(local_path: Path, r2_key: str) -> str:
+    log.info("Uploading %s → r2://%s/%s", local_path, R2_BUCKET, r2_key)
+    r2.upload_file(
+        str(local_path),
+        R2_BUCKET,
+        r2_key,
+        ExtraArgs={"ContentType": "application/geo+json"},
+    )
+    return f"{R2_PUBLIC_BASE}/{r2_key}"
 
 
 # ── Step 1: PDAL pre-processing ───────────────────────────────────────────────
@@ -100,15 +174,10 @@ def preprocess_and_classify(input_laz: Path, output_laz: Path, dtm_tif: Path) ->
     pipeline_json = {
         "pipeline": [
             str(input_laz),
-            # Statistical noise removal
             {"type": "filters.outlier", "method": "statistical", "mean_k": 12, "multiplier": 2.5},
-            # Ground classification (SMRF)
             {"type": "filters.smrf", "window": 18.0, "slope": 0.15, "threshold": 0.5, "cell": 1.0},
-            # Assign height above ground
             {"type": "filters.hag_nn", "count": 5},
-            # Write classified point cloud
             {"type": "writers.las", "filename": str(output_laz), "compression": "laszip"},
-            # Write DTM GeoTIFF at 10cm resolution
             {
                 "type": "writers.gdal",
                 "filename": str(dtm_tif),
@@ -117,11 +186,10 @@ def preprocess_and_classify(input_laz: Path, output_laz: Path, dtm_tif: Path) ->
                 "radius": 0.5,
                 "output_type": "min",
                 "gdaldriver": "GTiff",
-                "where": "Classification == 2",  # Ground points only
+                "where": "Classification == 2",
             },
         ]
     }
-
     pipeline = pdal.Pipeline(json.dumps(pipeline_json))
     pipeline.execute()
     arrays = pipeline.arrays
@@ -131,37 +199,18 @@ def preprocess_and_classify(input_laz: Path, output_laz: Path, dtm_tif: Path) ->
 # ── Step 2: Road surface extraction ──────────────────────────────────────────
 
 def extract_road_surface(points: np.ndarray) -> np.ndarray:
-    """
-    Extract road surface points using:
-    - Height above ground < 0.15m (near-ground)
-    - Planarity score > 0.85 (flat surface)
-    - Intensity filtering for pavement vs. vegetation
-    """
     if len(points) == 0:
         return np.array([])
-
-    # Height above ground filter (HeightAboveGround dimension from filters.hag_nn)
     hag = points["HeightAboveGround"] if "HeightAboveGround" in points.dtype.names else np.zeros(len(points))
-    near_ground = hag < 0.15
-
-    # Intensity filter: road surface typically 30–180 in 8-bit LiDAR
     intensity = points["Intensity"] if "Intensity" in points.dtype.names else np.ones(len(points)) * 100
-    road_intensity = (intensity > 20) & (intensity < 220)
-
-    road_mask = near_ground & road_intensity
-    log.info(f"Road surface: {road_mask.sum()} of {len(points)} points")
+    road_mask = (hag < 0.15) & (intensity > 20) & (intensity < 220)
+    log.info("Road surface: %d of %d points", road_mask.sum(), len(points))
     return points[road_mask]
 
 
 # ── Step 3: Road marking extraction ──────────────────────────────────────────
 
 def extract_road_markings(road_points: np.ndarray) -> List[Dict]:
-    """
-    Extract road markings using high-intensity returns on the road surface.
-    Road markings (white paint) have significantly higher intensity than asphalt.
-
-    Returns a list of GeoJSON-compatible feature dicts.
-    """
     if len(road_points) == 0:
         return []
 
@@ -169,7 +218,6 @@ def extract_road_markings(road_points: np.ndarray) -> List[Dict]:
     x = road_points["X"]
     y = road_points["Y"]
 
-    # High-intensity threshold: markings are typically 2× the median road intensity
     median_intensity = np.median(intensity)
     marking_threshold = median_intensity * 1.8
     marking_mask = intensity > marking_threshold
@@ -178,8 +226,6 @@ def extract_road_markings(road_points: np.ndarray) -> List[Dict]:
         return []
 
     marking_pts = np.column_stack([x[marking_mask], y[marking_mask]])
-
-    # Cluster marking points using DBSCAN-like approach (scipy)
     tree = cKDTree(marking_pts)
     visited = np.zeros(len(marking_pts), dtype=bool)
     clusters = []
@@ -189,29 +235,18 @@ def extract_road_markings(road_points: np.ndarray) -> List[Dict]:
             continue
         neighbors = tree.query_ball_point(marking_pts[i], r=0.3)
         if len(neighbors) >= 5:
-            cluster = list(neighbors)
-            visited[cluster] = True
-            clusters.append(cluster)
+            visited[neighbors] = True
+            clusters.append(neighbors)
 
     features = []
     for cluster_indices in clusters:
         cluster_pts = marking_pts[cluster_indices]
         if len(cluster_pts) < 3:
             continue
-
-        # Classify marking type by aspect ratio
         x_range = cluster_pts[:, 0].max() - cluster_pts[:, 0].min()
         y_range = cluster_pts[:, 1].max() - cluster_pts[:, 1].min()
         aspect = max(x_range, y_range) / (min(x_range, y_range) + 0.001)
-
-        if aspect > 5:
-            marking_type = "lane_line"
-        elif aspect > 2:
-            marking_type = "arrow"
-        else:
-            marking_type = "symbol"
-
-        # Create convex hull polygon for the marking
+        marking_type = "lane_line" if aspect > 5 else ("arrow" if aspect > 2 else "symbol")
         try:
             from shapely.geometry import MultiPoint
             hull = MultiPoint(cluster_pts).convex_hull
@@ -228,21 +263,13 @@ def extract_road_markings(road_points: np.ndarray) -> List[Dict]:
         except Exception:
             pass
 
-    log.info(f"Road markings detected: {len(features)}")
+    log.info("Road markings detected: %d", len(features))
     return features
 
 
 # ── Step 4: Traffic sign detection ───────────────────────────────────────────
 
 def detect_traffic_signs(input_laz: Path) -> List[Dict]:
-    """
-    Run OpenPCDet PointPillars model for traffic sign detection and classification.
-
-    Falls back to a geometric heuristic if the model is not available:
-    - Vertical planar clusters at 2–4m height
-    - Small bounding box (< 2m × 2m)
-    - High reflectivity (retroreflective sign material)
-    """
     features = []
 
     if Path(MODEL_PATH).exists():
@@ -262,10 +289,7 @@ def detect_traffic_signs(input_laz: Path) -> List[Dict]:
                 for det in detections.get("detections", []):
                     features.append({
                         "type": "Feature",
-                        "geometry": {
-                            "type": "Point",
-                            "coordinates": [det["x"], det["y"], det["z"]],
-                        },
+                        "geometry": {"type": "Point", "coordinates": [det["x"], det["y"], det["z"]]},
                         "properties": {
                             "asset_type": "traffic_sign",
                             "sign_class": det.get("class", "unknown"),
@@ -273,12 +297,12 @@ def detect_traffic_signs(input_laz: Path) -> List[Dict]:
                             "height_m": det.get("z", 0.0),
                         },
                     })
-                log.info(f"Traffic signs detected (OpenPCDet): {len(features)}")
+                log.info("Traffic signs detected (OpenPCDet): %d", len(features))
                 return features
         except Exception as e:
-            log.warning(f"OpenPCDet inference failed, using geometric fallback: {e}")
+            log.warning("OpenPCDet inference failed, using geometric fallback: %s", e)
 
-    # Geometric fallback: high-intensity vertical clusters at sign height
+    # Geometric fallback
     pipeline_json = {
         "pipeline": [
             str(input_laz),
@@ -286,115 +310,81 @@ def detect_traffic_signs(input_laz: Path) -> List[Dict]:
             {"type": "filters.range", "limits": "Intensity[180:255]"},
         ]
     }
-
     try:
         pipeline = pdal.Pipeline(json.dumps(pipeline_json))
         pipeline.execute()
         pts = pipeline.arrays[0] if pipeline.arrays else np.array([])
-
         if len(pts) > 0:
             x, y, z = pts["X"], pts["Y"], pts["Z"]
             tree = cKDTree(np.column_stack([x, y]))
             visited = np.zeros(len(pts), dtype=bool)
-
             for i in range(len(pts)):
                 if visited[i]:
                     continue
                 neighbors = tree.query_ball_point([x[i], y[i]], r=0.5)
                 if 3 <= len(neighbors) <= 200:
                     visited[neighbors] = True
-                    cx = float(np.mean(x[neighbors]))
-                    cy = float(np.mean(y[neighbors]))
-                    cz = float(np.mean(z[neighbors]))
                     features.append({
                         "type": "Feature",
-                        "geometry": {"type": "Point", "coordinates": [cx, cy, cz]},
+                        "geometry": {"type": "Point", "coordinates": [
+                            float(np.mean(x[neighbors])),
+                            float(np.mean(y[neighbors])),
+                            float(np.mean(z[neighbors])),
+                        ]},
                         "properties": {
                             "asset_type": "traffic_sign",
                             "sign_class": "unknown",
                             "confidence": 0.5,
-                            "height_m": cz,
                             "detection_method": "geometric_fallback",
                         },
                     })
     except Exception as e:
-        log.warning(f"Geometric sign detection failed: {e}")
+        log.warning("Geometric sign detection failed: %s", e)
 
-    log.info(f"Traffic signs detected (geometric): {len(features)}")
+    log.info("Traffic signs detected (geometric): %d", len(features))
     return features
 
 
 # ── Step 5: Drain and manhole detection ──────────────────────────────────────
 
 def detect_drains(dtm_tif: Path, road_points: np.ndarray) -> List[Dict]:
-    """
-    Detect road drains and manholes using DTM local minima analysis.
-    Drains appear as local depressions (< -0.05m relative to surroundings) on the road surface.
-    """
     features = []
-
     try:
         import rasterio
-        from rasterio.transform import rowcol
-
         with rasterio.open(str(dtm_tif)) as src:
             dtm = src.read(1)
             transform = src.transform
-
-            # Detect local minima using morphological erosion
             eroded = ndimage.grey_erosion(dtm, size=(5, 5))
             local_min_mask = (dtm < eroded + 0.02) & (dtm != src.nodata)
-
-            # Label connected components
             labeled, num_features = ndimage.label(local_min_mask)
-            log.info(f"DTM local minima candidates: {num_features}")
-
             for label_id in range(1, num_features + 1):
                 component = labeled == label_id
-                pixel_count = component.sum()
-
-                # Drains are small (0.2–2m²) depressions
-                area_m2 = pixel_count * (src.res[0] * src.res[1])
+                area_m2 = component.sum() * (src.res[0] * src.res[1])
                 if not (0.05 <= area_m2 <= 4.0):
                     continue
-
-                # Get centroid in world coordinates
                 rows, cols = np.where(component)
-                center_row = int(np.mean(rows))
-                center_col = int(np.mean(cols))
-                cx, cy = rasterio.transform.xy(transform, center_row, center_col)
-
+                cx, cy = rasterio.transform.xy(transform, int(np.mean(rows)), int(np.mean(cols)))
                 depth = float(np.min(dtm[component]) - np.mean(dtm[~component & (labeled == 0)]))
-
-                drain_type = "manhole" if area_m2 > 0.5 else "drain"
-
                 features.append({
                     "type": "Feature",
                     "geometry": {"type": "Point", "coordinates": [cx, cy]},
                     "properties": {
-                        "asset_type": drain_type,
+                        "asset_type": "manhole" if area_m2 > 0.5 else "drain",
                         "area_m2": round(area_m2, 3),
                         "depth_m": round(abs(depth), 3),
                     },
                 })
-
     except ImportError:
         log.warning("rasterio not available — skipping drain detection")
     except Exception as e:
-        log.warning(f"Drain detection failed: {e}")
-
-    log.info(f"Drains/manholes detected: {len(features)}")
+        log.warning("Drain detection failed: %s", e)
+    log.info("Drains/manholes detected: %d", len(features))
     return features
 
 
 # ── Step 6: Assemble GeoJSON output ──────────────────────────────────────────
 
-def build_geojson(
-    road_markings: List[Dict],
-    traffic_signs: List[Dict],
-    drains: List[Dict],
-) -> dict:
-    """Assemble all detected features into a single GeoJSON FeatureCollection."""
+def build_geojson(road_markings: List[Dict], traffic_signs: List[Dict], drains: List[Dict]) -> dict:
     all_features = road_markings + traffic_signs + drains
     return {
         "type": "FeatureCollection",
@@ -410,102 +400,121 @@ def build_geojson(
 
 # ── Main processing loop ──────────────────────────────────────────────────────
 
-def process_message(message: dict):
-    job_id = message["job_id"]
-    dataset_id = message["dataset_id"]
-    organization_id = message["organization_id"]
-    s3_input_key = message["s3_input_key"]
+def process_job(job: dict) -> None:
+    job_id = job["id"]
+    dataset = job.get("datasets") or {}
+    dataset_id = dataset.get("id") or job.get("dataset_id")
+    org_id = dataset.get("organization_id") or job.get("organization_id")
+    raw_key = dataset.get("s3_raw_key") or job.get("parameters", {}).get("r2_input_key")
 
-    log.info(f"Starting road asset extraction: job={job_id}, dataset={dataset_id}")
-    update_job(job_id, "running", 5)
+    if not raw_key:
+        raise ValueError("Job has no s3_raw_key / r2_input_key")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    log.info("Processing job %s | dataset %s | key %s", job_id, dataset_id, raw_key)
+
+    with tempfile.TemporaryDirectory(prefix="road_assets_") as tmpdir:
         tmp = Path(tmpdir)
-        input_laz = tmp / "input.laz"
+        input_ext = Path(raw_key).suffix or ".laz"
+        input_laz = tmp / f"input{input_ext}"
         classified_laz = tmp / "classified.laz"
         dtm_tif = tmp / "dtm.tif"
         output_geojson = tmp / f"{dataset_id}_road_assets.geojson"
 
         # Step 1: Download
-        if is_cancelled(job_id): return
-        download_from_s3(s3_input_key, input_laz)
-        update_job(job_id, "running", 10)
+        if is_cancelled(job_id):
+            update_job(job_id, "cancelled")
+            return
+        update_job(job_id, "processing", 10)
+        download_from_r2(raw_key, input_laz)
 
         # Step 2: Pre-process and classify
-        if is_cancelled(job_id): return
+        if is_cancelled(job_id):
+            update_job(job_id, "cancelled")
+            return
+        update_job(job_id, "processing", 20)
         all_points = preprocess_and_classify(input_laz, classified_laz, dtm_tif)
-        update_job(job_id, "running", 25)
 
         # Step 3: Extract road surface
-        if is_cancelled(job_id): return
+        if is_cancelled(job_id):
+            update_job(job_id, "cancelled")
+            return
+        update_job(job_id, "processing", 35)
         road_points = extract_road_surface(all_points)
-        update_job(job_id, "running", 40)
 
         # Step 4: Road markings
-        if is_cancelled(job_id): return
+        if is_cancelled(job_id):
+            update_job(job_id, "cancelled")
+            return
+        update_job(job_id, "processing", 50)
         road_markings = extract_road_markings(road_points)
-        update_job(job_id, "running", 55)
 
         # Step 5: Traffic signs
-        if is_cancelled(job_id): return
+        if is_cancelled(job_id):
+            update_job(job_id, "cancelled")
+            return
+        update_job(job_id, "processing", 65)
         traffic_signs = detect_traffic_signs(classified_laz)
-        update_job(job_id, "running", 70)
 
         # Step 6: Drains
-        if is_cancelled(job_id): return
+        if is_cancelled(job_id):
+            update_job(job_id, "cancelled")
+            return
+        update_job(job_id, "processing", 80)
         drains = detect_drains(dtm_tif, road_points)
-        update_job(job_id, "running", 85)
 
         # Step 7: Build and upload GeoJSON
+        update_job(job_id, "processing", 90)
         geojson = build_geojson(road_markings, traffic_signs, drains)
         output_geojson.write_text(json.dumps(geojson, indent=2))
 
-        base_key = f"processed/{organization_id}/{dataset_id}"
-        geojson_s3_key = f"{base_key}/{dataset_id}_road_assets.geojson"
-        upload_to_s3(output_geojson, geojson_s3_key)
+        geojson_key = f"processed/{org_id}/{dataset_id}/{dataset_id}_road_assets.geojson"
+        public_url = upload_to_r2(output_geojson, geojson_key)
 
         # Step 8: Update Supabase
         supabase.table("datasets").update({
-            "status": "completed",
-            "s3_road_assets_key": geojson_s3_key,
+            "road_assets_url": public_url,
             "road_asset_stats": geojson["metadata"],
         }).eq("id", dataset_id).execute()
 
-        update_job(job_id, "completed", 100)
-        log.info(f"Road asset extraction complete: job={job_id}, features={geojson['metadata']['total_features']}")
-
-
-def main():
-    log.info("Road Assets Worker started — polling SQS")
-    while True:
-        response = sqs.receive_message(
-            QueueUrl=SQS_URL,
-            MaxNumberOfMessages=1,
-            WaitTimeSeconds=20,
-            MessageAttributeNames=["job_type"],
+        update_job(job_id, "completed", 100, result_url=public_url)
+        log.info(
+            "Road asset extraction complete: job=%s, features=%d",
+            job_id,
+            geojson["metadata"]["total_features"],
         )
 
-        messages = response.get("Messages", [])
-        if not messages:
-            continue
 
-        for msg in messages:
-            body = {}
-            try:
-                body = json.loads(msg["Body"])
-                if body.get("job_type") == "road_asset_extraction":
-                    process_message(body)
-                    sqs.delete_message(QueueUrl=SQS_URL, ReceiptHandle=msg["ReceiptHandle"])
-                else:
-                    sqs.change_message_visibility(
-                        QueueUrl=SQS_URL,
-                        ReceiptHandle=msg["ReceiptHandle"],
-                        VisibilityTimeout=0,
-                    )
-            except Exception as e:
-                log.error(f"Worker error: {e}", exc_info=True)
-                if body.get("job_id"):
-                    update_job(body["job_id"], "failed", error=str(e))
+def main() -> None:
+    log.info("Road Assets Worker started — polling Supabase | interval=%ds", POLL_INTERVAL)
+    consecutive_errors = 0
+    while True:
+        try:
+            job = claim_job()
+            if job:
+                consecutive_errors = 0
+                try:
+                    process_job(job)
+                except Exception as exc:
+                    log.exception("Job %s failed: %s", job.get("id"), exc)
+                    try:
+                        update_job(job["id"], "failed", error=str(exc))
+                        dataset = job.get("datasets") or {}
+                        dataset_id = dataset.get("id") or job.get("dataset_id")
+                        if dataset_id:
+                            supabase.table("datasets").update({"status": "failed"}).eq(
+                                "id", dataset_id
+                            ).execute()
+                    except Exception:
+                        pass
+            else:
+                time.sleep(POLL_INTERVAL)
+        except KeyboardInterrupt:
+            log.info("Worker shutting down (SIGINT)")
+            break
+        except Exception as exc:
+            consecutive_errors += 1
+            log.exception("Unexpected error in main loop: %s", exc)
+            time.sleep(min(POLL_INTERVAL * consecutive_errors, 120))
 
 
 if __name__ == "__main__":

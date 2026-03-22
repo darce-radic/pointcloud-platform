@@ -313,3 +313,139 @@ async def delete_dataset(
     )
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+
+@router.post(
+    "/datasets/{dataset_id}/bim-extraction",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Trigger BIM extraction (IFC + DXF floor plan) for a dataset",
+)
+async def trigger_bim_extraction(
+    dataset_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Queues a bim_extraction job for the given dataset.
+
+    The BIM extraction worker polls `processing_jobs` for job_type='bim_extraction'
+    and produces:
+      - An IFC 4 file (walls, slabs, doors, windows, spaces)
+      - A DXF floor plan (layered: WALLS, DOORS, WINDOWS, ROOMS)
+      - A segments JSON for viewer overlay
+
+    Both files are uploaded to R2 and the dataset record is updated with their URLs.
+    """
+    # Verify dataset belongs to user's organization and is ready
+    dataset = (
+        supabase.table("datasets")
+        .select("id, organization_id, s3_raw_key, name, status")
+        .eq("id", dataset_id)
+        .eq("organization_id", user.organization_id)
+        .maybe_single()
+        .execute()
+    )
+    if not dataset.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+    d = dataset.data
+    if d.get("status") not in ("ready", "completed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Dataset must be in 'ready' or 'completed' state to run BIM extraction (current: {d.get('status')})",
+        )
+
+    raw_key = d.get("s3_raw_key")
+    if not raw_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset has no source file")
+
+    job_id = str(uuid.uuid4())
+
+    # Create processing job record
+    supabase.table("processing_jobs").insert({
+        "id": job_id,
+        "dataset_id": dataset_id,
+        "organization_id": user.organization_id,
+        "job_type": "bim_extraction",
+        "status": "queued",
+        "parameters": {
+            "r2_input_key": raw_key,
+            "dataset_id": dataset_id,
+        },
+        "created_by": user.user_id,
+    }).execute()
+
+    return {
+        "dataset_id": dataset_id,
+        "job_id": job_id,
+        "status": "queued",
+        "message": "BIM extraction queued. The worker will produce IFC and DXF outputs.",
+    }
+
+
+@router.post(
+    "/datasets/{dataset_id}/road-assets",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Trigger road asset extraction (GeoJSON) for a dataset",
+)
+async def trigger_road_assets(
+    dataset_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Queues a road_asset_extraction job for the given dataset.
+
+    The road assets worker polls `processing_jobs` for job_type='road_asset_extraction'
+    and produces a GeoJSON FeatureCollection containing:
+      - Road markings (lane lines, arrows, symbols)
+      - Traffic signs
+      - Drains and manholes
+
+    The GeoJSON is uploaded to R2 and the dataset record is updated with its URL.
+    """
+    # Verify dataset belongs to user's organization and is ready
+    dataset = (
+        supabase.table("datasets")
+        .select("id, organization_id, s3_raw_key, name, status")
+        .eq("id", dataset_id)
+        .eq("organization_id", user.organization_id)
+        .maybe_single()
+        .execute()
+    )
+    if not dataset.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+    d = dataset.data
+    if d.get("status") not in ("ready", "completed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Dataset must be in 'ready' or 'completed' state to run road asset extraction (current: {d.get('status')})",
+        )
+
+    raw_key = d.get("s3_raw_key")
+    if not raw_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset has no source file")
+
+    job_id = str(uuid.uuid4())
+
+    # Create processing job record
+    supabase.table("processing_jobs").insert({
+        "id": job_id,
+        "dataset_id": dataset_id,
+        "organization_id": user.organization_id,
+        "job_type": "road_asset_extraction",
+        "status": "queued",
+        "parameters": {
+            "r2_input_key": raw_key,
+            "dataset_id": dataset_id,
+        },
+        "created_by": user.user_id,
+    }).execute()
+
+    return {
+        "dataset_id": dataset_id,
+        "job_id": job_id,
+        "status": "queued",
+        "message": "Road asset extraction queued. The worker will produce a GeoJSON output.",
+    }
