@@ -6,11 +6,23 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from dependencies import get_current_user, get_supabase, AuthenticatedUser
 from supabase import Client
+
+N8N_NEW_USER_WEBHOOK = "https://n8n-production-74b2f.up.railway.app/webhook/new-user-onboarding"
+
+
+async def _notify_n8n(url: str, payload: dict) -> None:
+    """Fire-and-forget POST to an n8n webhook."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(url, json=payload)
+    except Exception:
+        pass
 
 router = APIRouter()
 
@@ -60,6 +72,15 @@ async def create_organization(
         "user_id": user.user_id,
         "role": "owner",
     }).execute()
+
+    # Trigger n8n onboarding workflow for the new user
+    await _notify_n8n(N8N_NEW_USER_WEBHOOK, {
+        "user_id": user.user_id,
+        "user_email": user.email,
+        "organization_id": org_id,
+        "organization_name": request.name,
+        "organization_slug": request.slug,
+    })
 
     return {"organization_id": org_id, "name": request.name, "slug": request.slug}
 

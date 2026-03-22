@@ -9,6 +9,7 @@ Pricing tiers (all billed monthly):
 """
 from __future__ import annotations
 
+import httpx
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -16,6 +17,18 @@ from supabase import Client
 
 from config import settings
 from dependencies import get_current_user, get_supabase, AuthenticatedUser
+
+N8N_PAYMENT_FAILED_WEBHOOK = "https://n8n-production-74b2f.up.railway.app/webhook/payment-failed"
+N8N_NEW_USER_WEBHOOK = "https://n8n-production-74b2f.up.railway.app/webhook/new-user-onboarding"
+
+
+async def _notify_n8n(url: str, payload: dict) -> None:
+    """Fire-and-forget POST to an n8n webhook. Errors are silently logged."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(url, json=payload)
+    except Exception:
+        pass  # Never let n8n notification failures break the main flow
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
@@ -335,8 +348,31 @@ async def stripe_webhook(
     # ── Invoice payment failed ────────────────────────────────────────────────
     elif event_type == "invoice.payment_failed":
         customer_id = data.get("customer")
+        amount_due = data.get("amount_due", 0)
+        invoice_id = data.get("id", "")
+
+        # Update profile status
         supabase.table("profiles").update({
             "subscription_status": "past_due",
         }).eq("stripe_customer_id", customer_id).execute()
+
+        # Look up customer email from Stripe
+        try:
+            sc = _stripe_client()
+            customer = sc.customers.retrieve(customer_id)
+            customer_email = customer.get("email", "")
+            customer_name = customer.get("name", "")
+        except Exception:
+            customer_email = ""
+            customer_name = ""
+
+        # Notify n8n payment failure workflow
+        await _notify_n8n(N8N_PAYMENT_FAILED_WEBHOOK, {
+            "stripe_customer_id": customer_id,
+            "customer_email": customer_email,
+            "customer_name": customer_name,
+            "amount_due": amount_due,
+            "invoice_id": invoice_id,
+        })
 
     return {"received": True}
