@@ -1,15 +1,15 @@
 # Tiling Worker — Cloud-Optimised Point Cloud (COPC) converter
-# Uses the official PDAL image which bundles PDAL + all drivers (LAS, E57, PLY, etc.)
-# NOTE: pdal/pdal is Miniconda-based — use conda to install Python, not apt
-FROM pdal/pdal:2.8.0
+# Uses Miniconda3 as base, installs PDAL via conda-forge and Python packages via pip
+# This avoids the conda Python path conflict in the pdal/pdal image
+FROM continuumio/miniconda3:24.1.2-0
 
-# Install Python 3.11 and pip via conda (the pdal image uses Miniconda, not apt)
-RUN conda install -n base -c conda-forge python=3.11 pip -y && \
+# Install PDAL and its dependencies via conda-forge (includes all drivers: LAS, E57, PLY, etc.)
+RUN conda install -n base -c conda-forge pdal python-pdal python=3.11 -y && \
     conda clean -afy
 
 WORKDIR /app
 
-# Install Python dependencies
+# Install Python dependencies via pip (uses the conda base Python 3.11)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -17,8 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 
 # Health check — verify PDAL is available
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD pdal --version || exit 1
 
-# Run the worker
+# Run the worker using the conda base Python
 CMD ["python", "-u", "src/worker.py"]
