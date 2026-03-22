@@ -1,5 +1,9 @@
-# Tiling Worker Dependencies
-pdal==3.4.5
-boto3==1.35.80
+boto3==1.35.99
+botocore==1.35.99
 supabase==2.10.0
-numpy==1.26.4
+httpx>=0.26,<0.28
+postgrest>=0.17,<0.18
+gotrue>=2.9,<3.0
+realtime>=2.0,<3.0
+storage3>=0.8,<0.9
+pydantic>=2.0,<3.0
