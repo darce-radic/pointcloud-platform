@@ -32,69 +32,223 @@ interface ViewerClientProps {
 }
 
 export default function ViewerClient({ dataset, workflowTools }: ViewerClientProps) {
-  const viewerRef = useRef<HTMLDivElement>(null)
-  const [potreeLoaded, setPotreeLoaded] = useState(false)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [viewerReady, setViewerReady] = useState(false)
+  const [loadingStatus, setLoadingStatus] = useState('Initialising viewer...')
   const [chatOpen, setChatOpen] = useState(false)
   const [activeJob, setActiveJob] = useState<string | null>(null)
-  const [viewerReady, setViewerReady] = useState(false)
   const supabase = createClient()
 
-  // Load Potree from CDN
+  // Load and render the COPC point cloud using Three.js + copc library
   useEffect(() => {
     if (typeof window === 'undefined') return
-
-    const loadPotree = async () => {
-      // Load Potree CSS
-      const link = document.createElement('link')
-      link.rel = 'stylesheet'
-      link.href = 'https://cdn.jsdelivr.net/npm/potree-core@2.0.0/src/viewer/potree.css'
-      document.head.appendChild(link)
-
-      // Load Three.js first
-      if (!(window as unknown as Record<string, unknown>).THREE) {
-        await loadScript('https://cdn.jsdelivr.net/npm/three@0.137.0/build/three.min.js')
-      }
-
-      // Load Potree
-      if (!(window as unknown as Record<string, unknown>).Potree) {
-        await loadScript('https://cdn.jsdelivr.net/npm/potree-core@2.0.0/build/potree.js')
-      }
-
-      setPotreeLoaded(true)
+    if (!canvasRef.current || !containerRef.current) return
+    if (!dataset.copcUrl) {
+      setLoadingStatus('Dataset is still processing...')
+      return
     }
 
-    loadPotree()
-  }, [])
+    let animationId: number
+    let destroyed = false
 
-  // Initialise the viewer once Potree is loaded
-  useEffect(() => {
-    if (!potreeLoaded || !viewerRef.current || !dataset.copcUrl) return
+    const init = async () => {
+      try {
+        setLoadingStatus('Loading Three.js...')
 
-    const w = window as unknown as Record<string, unknown>
-    const Potree = w.Potree as {
-      Viewer: new (el: HTMLElement) => {
-        setEDLEnabled: (v: boolean) => void
-        setBackground: (v: string) => void
-        scene: { addPointCloud: (pc: unknown) => void; view: { position: { set: (x: number, y: number, z: number) => void }; lookAt: { set: (x: number, y: number, z: number) => void } } }
+        // Dynamically import Three.js (installed as npm package)
+        const THREE = await import('three')
+
+        if (destroyed) return
+
+        setLoadingStatus('Reading COPC header...')
+
+        // Dynamically import copc library
+        const { Copc } = await import('copc')
+
+        if (destroyed) return
+
+        // Load COPC file metadata
+        const copc = await Copc.create(dataset.copcUrl!)
+        const { header, info } = copc
+
+        if (destroyed) return
+
+        setLoadingStatus(`Loading ${(header.pointCount / 1_000_000).toFixed(1)}M points...`)
+
+        // Read the root node (LOD 0) for initial display
+        const nodes = await Copc.loadHierarchyPage(dataset.copcUrl!, info.rootHierarchyPage)
+        const rootKey = '0-0-0-0'
+        const rootNode = nodes.nodes[rootKey]
+
+        let positions: Float32Array
+        let colors: Float32Array | null = null
+
+        if (rootNode) {
+          const view = await Copc.loadPointDataView(dataset.copcUrl!, copc, rootNode)
+          const count = view.pointCount
+
+        const getX = view.getter('X')
+        const getY = view.getter('Y')
+        const getZ = view.getter('Z')
+
+        // Check if colour dimensions are available in this file
+        const hasColor = 'Red' in view.dimensions && 'Green' in view.dimensions && 'Blue' in view.dimensions
+        const getRed = hasColor ? view.getter('Red') : null
+        const getGreen = hasColor ? view.getter('Green') : null
+        const getBlue = hasColor ? view.getter('Blue') : null
+
+        positions = new Float32Array(count * 3)
+        if (hasColor) {
+          colors = new Float32Array(count * 3)
+        }
+
+          // Compute centroid for centering
+          let cx = 0, cy = 0, cz = 0
+          for (let i = 0; i < count; i++) {
+            cx += getX(i) as number
+            cy += getY(i) as number
+            cz += getZ(i) as number
+          }
+          cx /= count; cy /= count; cz /= count
+
+          for (let i = 0; i < count; i++) {
+            positions[i * 3] = (getX(i) as number) - cx
+            positions[i * 3 + 1] = (getY(i) as number) - cy
+            positions[i * 3 + 2] = (getZ(i) as number) - cz
+
+            if (colors && getRed && getGreen && getBlue) {
+              // COPC stores 16-bit colours, normalise to 0-1
+              colors[i * 3] = (getRed(i) as number) / 65535
+              colors[i * 3 + 1] = (getGreen(i) as number) / 65535
+              colors[i * 3 + 2] = (getBlue(i) as number) / 65535
+            } else if (colors) {
+              colors[i * 3] = 0.5
+              colors[i * 3 + 1] = 0.7
+              colors[i * 3 + 2] = 1.0
+            }
+          }
+        } else {
+          // Fallback: empty geometry
+          positions = new Float32Array(0)
+        }
+
+        if (destroyed) return
+
+        setLoadingStatus('Rendering...')
+
+        // --- Three.js scene setup ---
+        const canvas = canvasRef.current!
+        const container = containerRef.current!
+        const width = container.clientWidth
+        const height = container.clientHeight
+
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: false })
+        renderer.setSize(width, height)
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+        renderer.setClearColor(0x000000)
+
+        const scene = new THREE.Scene()
+
+        const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 100000)
+        const bbox = header.min && header.max
+          ? Math.max(
+              header.max[0] - header.min[0],
+              header.max[1] - header.min[1],
+              header.max[2] - header.min[2]
+            )
+          : 1000
+        camera.position.set(0, -bbox * 0.8, bbox * 0.5)
+        camera.lookAt(0, 0, 0)
+
+        // Point cloud geometry
+        const geometry = new THREE.BufferGeometry()
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+        if (colors) {
+          geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+        }
+
+        const material = new THREE.PointsMaterial({
+          size: 2,
+          sizeAttenuation: false,
+          vertexColors: !!colors,
+          color: colors ? 0xffffff : 0x88aaff,
+        })
+
+        const pointCloud = new THREE.Points(geometry, material)
+        scene.add(pointCloud)
+
+        // Simple orbit controls (mouse drag to rotate)
+        let isDragging = false
+        let prevMouse = { x: 0, y: 0 }
+        let spherical = { theta: 0, phi: Math.PI / 3, radius: bbox * 1.2 }
+
+        const updateCamera = () => {
+          camera.position.set(
+            spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta),
+            -spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta),
+            spherical.radius * Math.cos(spherical.phi)
+          )
+          camera.lookAt(0, 0, 0)
+        }
+        updateCamera()
+
+        canvas.addEventListener('mousedown', (e) => { isDragging = true; prevMouse = { x: e.clientX, y: e.clientY } })
+        canvas.addEventListener('mouseup', () => { isDragging = false })
+        canvas.addEventListener('mousemove', (e) => {
+          if (!isDragging) return
+          const dx = (e.clientX - prevMouse.x) * 0.005
+          const dy = (e.clientY - prevMouse.y) * 0.005
+          spherical.theta -= dx
+          spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + dy))
+          prevMouse = { x: e.clientX, y: e.clientY }
+          updateCamera()
+        })
+        canvas.addEventListener('wheel', (e) => {
+          spherical.radius *= e.deltaY > 0 ? 1.1 : 0.9
+          spherical.radius = Math.max(1, spherical.radius)
+          updateCamera()
+        }, { passive: true })
+
+        // Handle resize
+        const onResize = () => {
+          const w = container.clientWidth
+          const h = container.clientHeight
+          renderer.setSize(w, h)
+          camera.aspect = w / h
+          camera.updateProjectionMatrix()
+        }
+        window.addEventListener('resize', onResize)
+
+        // Render loop
+        const animate = () => {
+          if (destroyed) return
+          animationId = requestAnimationFrame(animate)
+          renderer.render(scene, camera)
+        }
+        animate()
+
+        setViewerReady(true)
+
+        return () => {
+          window.removeEventListener('resize', onResize)
+          renderer.dispose()
+          geometry.dispose()
+          material.dispose()
+        }
+      } catch (err) {
+        console.error('Viewer error:', err)
+        setLoadingStatus('Failed to load point cloud. Please try again.')
       }
-      loadPointCloud: (url: string, name: string, cb: (e: { pointcloud: unknown }) => void) => void
     }
 
-    if (!Potree) return
-
-    const viewer = new Potree.Viewer(viewerRef.current)
-    viewer.setEDLEnabled(true)
-    viewer.setBackground('black')
-
-    Potree.loadPointCloud(dataset.copcUrl, dataset.name, (e) => {
-      viewer.scene.addPointCloud(e.pointcloud)
-      setViewerReady(true)
-    })
+    init()
 
     return () => {
-      // Cleanup handled by React unmount
+      destroyed = true
+      if (animationId) cancelAnimationFrame(animationId)
     }
-  }, [potreeLoaded, dataset.copcUrl, dataset.name])
+  }, [dataset.copcUrl, dataset.name])
 
   // Subscribe to job updates via Supabase Realtime
   useEffect(() => {
@@ -138,18 +292,16 @@ export default function ViewerClient({ dataset, workflowTools }: ViewerClientPro
   }, [dataset.id, supabase])
 
   return (
-    <div className="relative w-full h-screen bg-black overflow-hidden">
-      {/* Potree viewer canvas */}
-      <div ref={viewerRef} className="absolute inset-0" />
+    <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden">
+      {/* Three.js canvas */}
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 
-      {/* Loading state */}
+      {/* Loading overlay */}
       {!viewerReady && (
         <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
           <div className="text-center">
             <div className="w-8 h-8 border border-white border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-[#555] text-sm">
-              {!dataset.copcUrl ? 'Dataset is still processing...' : 'Loading point cloud...'}
-            </p>
+            <p className="text-[#555] text-sm">{loadingStatus}</p>
           </div>
         </div>
       )}
@@ -174,6 +326,13 @@ export default function ViewerClient({ dataset, workflowTools }: ViewerClientPro
           </button>
         </div>
       </div>
+
+      {/* Controls hint */}
+      {viewerReady && (
+        <div className="absolute bottom-4 left-4 z-20 text-[#333] text-xs space-y-0.5">
+          <p>Drag to rotate · Scroll to zoom</p>
+        </div>
+      )}
 
       {/* Workflow toolbar */}
       <ViewerToolbar
@@ -201,14 +360,4 @@ export default function ViewerClient({ dataset, workflowTools }: ViewerClientPro
       )}
     </div>
   )
-}
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = src
-    script.onload = () => resolve()
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
 }

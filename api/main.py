@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from config import settings
 
-from routers import datasets, conversations, organizations, projects, jobs
+from routers import datasets, conversations, organizations, projects, jobs, billing
 from agent import graph as agent_graph
 
 
@@ -39,6 +39,7 @@ app.include_router(projects.router, prefix="/api/v1", tags=["Projects"])
 app.include_router(datasets.router, prefix="/api/v1", tags=["Datasets"])
 app.include_router(jobs.router, prefix="/api/v1", tags=["Jobs"])
 app.include_router(conversations.router, prefix="/api/v1", tags=["AI"])
+app.include_router(billing.router, prefix="/api/v1", tags=["Billing"])
 app.include_router(agent_graph.router)
 
 

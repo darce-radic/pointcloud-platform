@@ -38,9 +38,11 @@ class Settings(BaseSettings):
 
     # ── Stripe (optional — billing) ───────────────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
-    STRIPE_PROFESSIONAL_PRICE_ID: str = ""
-    STRIPE_BUSINESS_PRICE_ID: str = ""
+    STRIPE_STARTER_PRICE_ID: str = ""
+    STRIPE_PRO_PRICE_ID: str = ""
+    STRIPE_ENTERPRISE_PRICE_ID: str = ""
 
     # ── Internal ──────────────────────────────────────────────────────────────
     API_SECRET_KEY: str = ""
