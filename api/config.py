@@ -25,16 +25,25 @@ class Settings(BaseSettings):
     # ── OpenAI ────────────────────────────────────────────────────────────────
     OPENAI_API_KEY: str = ""
 
-    # ── AWS (optional — S3/SQS for file upload and job queuing) ──────────────
-    AWS_REGION: str = "us-east-1"
-    AWS_ACCESS_KEY_ID: str = ""
-    AWS_SECRET_ACCESS_KEY: str = ""
-    S3_BUCKET_NAME: str = ""
-    SQS_QUEUE_URL: str = ""
+    # ── Cloudflare R2 (S3-compatible object storage, zero egress fees) ────────
+    # Endpoint format: https://<account_id>.r2.cloudflarestorage.com
+    R2_ENDPOINT_URL: str = ""
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_BUCKET_NAME: str = "pointcloud-platform-data"
 
     # ── n8n (optional — workflow automation) ─────────────────────────────────
     N8N_API_URL: str = ""
     N8N_API_KEY: str = ""
+
+    # ── Stripe (optional — billing) ───────────────────────────────────────────
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PROFESSIONAL_PRICE_ID: str = ""
+    STRIPE_BUSINESS_PRICE_ID: str = ""
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+    API_SECRET_KEY: str = ""
 
 
 settings = Settings()

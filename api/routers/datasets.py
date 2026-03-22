@@ -2,19 +2,22 @@
 Datasets Router — file upload URL generation, dataset management, and pipeline triggering.
 
 Upload flow:
-  1. Frontend calls POST /projects/{id}/datasets/upload-url  → gets presigned S3 PUT URL + dataset_id
-  2. Frontend uploads file directly to S3 (never through this server)
+  1. Frontend calls POST /projects/{id}/datasets/upload-url  → gets presigned R2 PUT URL + dataset_id
+  2. Frontend uploads file directly to Cloudflare R2 (never through this server)
   3. Frontend calls POST /datasets/{id}/complete-upload       → creates DB record + enqueues tiling job
-  4. Tiling worker picks up SQS message, processes, updates job status via Supabase Realtime
+  4. Tiling worker polls Supabase processing_jobs table (status='queued'), processes the file,
+     and updates job status via Supabase Realtime
+
+Storage: Cloudflare R2 (S3-compatible, zero egress fees)
+Queue:   Supabase processing_jobs table (polled by workers, no separate queue service needed)
 """
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -25,22 +28,22 @@ from supabase import Client
 
 router = APIRouter()
 
-# ── AWS clients ───────────────────────────────────────────────────────────────
 
-def _s3_client():
+# ── Cloudflare R2 client (S3-compatible) ─────────────────────────────────────
+
+def _r2_client():
+    """
+    Returns a boto3 S3 client configured for Cloudflare R2.
+    R2 is fully S3-compatible — only the endpoint_url differs from AWS S3.
+    Signature version must be 's3v4'.
+    """
     return boto3.client(
         "s3",
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    )
-
-def _sqs_client():
-    return boto3.client(
-        "sqs",
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        endpoint_url=settings.R2_ENDPOINT_URL,
+        aws_access_key_id=settings.R2_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
+        config=Config(signature_version="s3v4"),
+        region_name="auto",  # R2 uses 'auto' as the region
     )
 
 
@@ -55,7 +58,7 @@ class UploadRequest(BaseModel):
 class UploadResponse(BaseModel):
     upload_url: str
     dataset_id: str
-    s3_key: str
+    r2_key: str
 
 
 class CompleteUploadRequest(BaseModel):
@@ -69,7 +72,7 @@ class CompleteUploadRequest(BaseModel):
     "/projects/{project_id}/datasets/upload-url",
     response_model=UploadResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Request a presigned S3 URL for direct browser upload",
+    summary="Request a presigned R2 URL for direct browser upload",
 )
 async def request_upload_url(
     project_id: str,
@@ -78,8 +81,8 @@ async def request_upload_url(
     supabase: Client = Depends(get_supabase),
 ):
     """
-    Generates a presigned S3 PUT URL valid for 1 hour. The frontend uploads
-    the file directly to S3 — the file never passes through this API server.
+    Generates a presigned Cloudflare R2 PUT URL valid for 1 hour. The frontend
+    uploads the file directly to R2 — the file never passes through this API server.
 
     Also creates a dataset record in Supabase with status='uploading' so the
     frontend can track progress immediately.
@@ -97,15 +100,15 @@ async def request_upload_url(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     dataset_id = str(uuid.uuid4())
-    s3_key = f"raw/{user.organization_id}/{project_id}/{dataset_id}/{request.filename}"
+    r2_key = f"raw/{user.organization_id}/{project_id}/{dataset_id}/{request.filename}"
 
-    # Generate presigned S3 URL
+    # Generate presigned R2 PUT URL (identical API to S3 presigned URLs)
     try:
-        presigned_url = _s3_client().generate_presigned_url(
+        presigned_url = _r2_client().generate_presigned_url(
             "put_object",
             Params={
-                "Bucket": settings.S3_BUCKET_NAME,
-                "Key": s3_key,
+                "Bucket": settings.R2_BUCKET_NAME,
+                "Key": r2_key,
                 "ContentType": "application/octet-stream",
             },
             ExpiresIn=3600,
@@ -125,7 +128,7 @@ async def request_upload_url(
             "name": request.filename,
             "description": request.description,
             "status": "uploading",
-            "s3_raw_key": s3_key,
+            "s3_raw_key": r2_key,  # column name kept for schema compatibility
             "file_size_bytes": request.size_bytes,
             "uploaded_by": user.user_id,
         }).execute()
@@ -135,7 +138,7 @@ async def request_upload_url(
             detail=f"Failed to create dataset record: {str(e)}",
         )
 
-    return UploadResponse(upload_url=presigned_url, dataset_id=dataset_id, s3_key=s3_key)
+    return UploadResponse(upload_url=presigned_url, dataset_id=dataset_id, r2_key=r2_key)
 
 
 @router.post(
@@ -150,12 +153,14 @@ async def complete_upload(
     supabase: Client = Depends(get_supabase),
 ):
     """
-    Called by the frontend after the S3 PUT completes.
+    Called by the frontend after the R2 PUT completes.
 
     1. Verifies the dataset belongs to the user's organization.
     2. Updates dataset status to 'queued'.
-    3. Creates a processing_jobs record.
-    4. Enqueues an SQS message to trigger the KEDA-scaled tiling worker.
+    3. Creates a processing_jobs record with status='queued'.
+
+    Workers poll the processing_jobs table for queued jobs and update progress
+    via Supabase Realtime — no separate queue service (SQS/Queues) required.
     """
     # Fetch dataset and verify ownership
     dataset = (
@@ -171,7 +176,7 @@ async def complete_upload(
 
     d = dataset.data
     job_id = str(uuid.uuid4())
-    s3_output_key = d["s3_raw_key"].replace("/raw/", "/processed/").replace(
+    r2_output_key = d["s3_raw_key"].replace("/raw/", "/processed/").replace(
         d["name"], f"{dataset_id}.copc.laz"
     )
 
@@ -181,7 +186,7 @@ async def complete_upload(
         "file_size_bytes": request.size_bytes,
     }).eq("id", dataset_id).execute()
 
-    # Create processing job record
+    # Create processing job record — workers poll this table for status='queued'
     supabase.table("processing_jobs").insert({
         "id": job_id,
         "dataset_id": dataset_id,
@@ -189,42 +194,19 @@ async def complete_upload(
         "job_type": "tiling",
         "status": "queued",
         "parameters": {
-            "s3_input_key": d["s3_raw_key"],
-            "s3_output_key": s3_output_key,
+            "r2_input_key": d["s3_raw_key"],
+            "r2_output_key": r2_output_key,
+            "r2_bucket": settings.R2_BUCKET_NAME,
             "dataset_id": dataset_id,
         },
         "created_by": user.user_id,
     }).execute()
 
-    # Enqueue SQS message — KEDA ScaledObject watches this queue and scales workers
-    sqs_message = {
-        "job_id": job_id,
-        "dataset_id": dataset_id,
-        "organization_id": user.organization_id,
-        "job_type": "tiling",
-        "s3_input_key": d["s3_raw_key"],
-        "s3_output_key": s3_output_key,
-    }
-    try:
-        _sqs_client().send_message(
-            QueueUrl=settings.SQS_QUEUE_URL,
-            MessageBody=json.dumps(sqs_message),
-            MessageGroupId=user.organization_id,  # FIFO queue grouping by org
-            MessageDeduplicationId=job_id,
-        )
-    except ClientError as e:
-        # Roll back job to 'failed' status if SQS submission fails
-        supabase.table("processing_jobs").update({"status": "failed", "error_message": str(e)}).eq("id", job_id).execute()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to enqueue processing job: {e.response['Error']['Message']}",
-        )
-
     return {
         "dataset_id": dataset_id,
         "job_id": job_id,
         "status": "queued",
-        "message": "Tiling pipeline enqueued. Track progress via the jobs endpoint or Supabase Realtime.",
+        "message": "Tiling pipeline queued. Track progress via the jobs endpoint or Supabase Realtime.",
     }
 
 
@@ -275,14 +257,53 @@ async def get_dataset(
 @router.delete(
     "/datasets/{dataset_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a dataset and its S3 objects",
+    summary="Delete a dataset and its R2 objects",
 )
 async def delete_dataset(
     dataset_id: str,
     user: AuthenticatedUser = Depends(get_current_user),
     supabase: Client = Depends(get_supabase),
 ):
-    """Soft-deletes the dataset record. S3 lifecycle rules handle object cleanup."""
+    """
+    Deletes the dataset record from Supabase and removes the associated
+    objects from Cloudflare R2 (both raw upload and processed output).
+    """
+    # Fetch dataset to get R2 keys before deletion
+    dataset = (
+        supabase.table("datasets")
+        .select("id, s3_raw_key, name")
+        .eq("id", dataset_id)
+        .eq("organization_id", user.organization_id)
+        .maybe_single()
+        .execute()
+    )
+    if not dataset.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+    d = dataset.data
+
+    # Delete R2 objects (raw upload + processed output)
+    try:
+        r2 = _r2_client()
+        keys_to_delete = []
+        if d.get("s3_raw_key"):
+            keys_to_delete.append({"Key": d["s3_raw_key"]})
+            # Also attempt to delete the processed output key
+            processed_key = d["s3_raw_key"].replace("/raw/", "/processed/").replace(
+                d["name"], f"{dataset_id}.copc.laz"
+            )
+            keys_to_delete.append({"Key": processed_key})
+
+        if keys_to_delete:
+            r2.delete_objects(
+                Bucket=settings.R2_BUCKET_NAME,
+                Delete={"Objects": keys_to_delete, "Quiet": True},
+            )
+    except ClientError:
+        # Log but don't fail — DB record deletion is more important
+        pass
+
+    # Delete the dataset record (cascades to processing_jobs via FK)
     result = (
         supabase.table("datasets")
         .delete()
