@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import AiChatPanel from '@/components/ai-chat/AiChatPanel'
 import ViewerToolbar from '@/components/viewer/ViewerToolbar'
@@ -9,6 +9,9 @@ import RenderModePanel from '@/components/viewer/RenderModePanel'
 import MeasurePanel from '@/components/viewer/MeasurePanel'
 import ClassificationPanel from '@/components/viewer/ClassificationPanel'
 import MapPanel from '@/components/viewer/MapPanel'
+
+// Lazy-load CesiumViewer to avoid SSR issues with the heavy Cesium bundle
+const CesiumViewer = lazy(() => import('@/components/viewer/CesiumViewer'))
 
 // ─── LAS classification labels (ASPRS standard) ──────────────────────────────
 const LAS_CLASSES: Record<number, string> = {
@@ -130,6 +133,7 @@ export default function ViewerClient({ dataset, workflowTools }: ViewerClientPro
   const [pendingPoints, setPendingPoints] = useState<[number, number, number][]>([])
   const [visibleClasses, setVisibleClasses] = useState<Set<number>>(new Set(Object.keys(LAS_CLASSES).map(Number)))
   const [mapOpen, setMapOpen] = useState(false)
+  const [cesiumMode, setCesiumMode] = useState(false)
 
   // ── Refs shared with Three.js loop ──────────────────────────────────────────
   const pointDataRef = useRef<PointData | null>(null)
@@ -622,6 +626,25 @@ export default function ViewerClient({ dataset, workflowTools }: ViewerClientPro
             )}
           </div>
           <div className="flex items-center gap-2 pointer-events-auto">
+            {/* Viewer mode toggle: Three.js ↔ Cesium */}
+            <div className="flex items-center bg-[#111] border border-[#222] rounded-lg overflow-hidden">
+              <button
+                onClick={() => setCesiumMode(false)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  !cesiumMode ? 'bg-white text-black' : 'text-[#666] hover:text-white'
+                }`}
+              >
+                3D
+              </button>
+              <button
+                onClick={() => setCesiumMode(true)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  cesiumMode ? 'bg-white text-black' : 'text-[#666] hover:text-white'
+                }`}
+              >
+                Cesium
+              </button>
+            </div>
             <button
               onClick={() => setChatOpen(v => !v)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${chatOpen ? 'bg-white text-black' : 'bg-[#111] text-[#888] hover:text-white border border-[#222]'}`}
@@ -716,6 +739,30 @@ export default function ViewerClient({ dataset, workflowTools }: ViewerClientPro
             onChange={(next) => { setVisibleClasses(next) }}
             onClose={() => setActivePanel(null)}
           />
+        )}
+
+        {/* ── Cesium viewer overlay (replaces Three.js canvas when active) ── */}
+        {cesiumMode && (
+          <div className="absolute inset-0 z-30">
+            <Suspense fallback={
+              <div className="absolute inset-0 flex items-center justify-center bg-[#080a0f]">
+                <div className="w-8 h-8 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
+              </div>
+            }>
+              <CesiumViewer
+                copcUrl={dataset.copcUrl}
+                pointCount={dataset.pointCount ?? undefined}
+                crsEpsg={dataset.crsEpsg ?? undefined}
+                boundingBox={dataset.boundingBox as any}
+                renderMode={renderMode}
+                measurements={measurements}
+                onMeasurementAdd={(m) => setMeasurements(ms => [...ms, m])}
+                visibleClasses={visibleClasses}
+                isMeasuring={!!measureMode}
+                measureType={measureMode ?? 'distance'}
+              />
+            </Suspense>
+          </div>
         )}
 
         {/* Controls hint */}
