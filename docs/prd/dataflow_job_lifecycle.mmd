@@ -1,0 +1,42 @@
+stateDiagram-v2
+    [*] --> pending : Dataset record created\n(POST /datasets/initiate-upload)
+
+    pending --> uploaded : Raw file PUT to R2\n+ POST /complete-upload
+
+    uploaded --> harmonizing : Worker claims job\n(claim_next_job RPC)\njob_type = harmonization
+
+    harmonizing --> tiling : Harmonization complete\nharmonized .laz written to R2
+
+    tiling --> ready : COPC written to R2\ndatasets.copc_url updated
+
+    ready --> processing_assets : User triggers\nPOST /datasets/{id}/extract-road-assets\njob_type = road_assets
+
+    ready --> processing_bim : User triggers\nPOST /datasets/{id}/extract-bim\njob_type = bim_extraction
+
+    processing_assets --> ready : road_assets_url + features\nwritten back to datasets
+
+    processing_bim --> ready : ifc_url + dxf_url + features\nwritten back to datasets
+
+    harmonizing --> failed : Worker error\nerror_message recorded
+
+    tiling --> failed : Worker error\nerror_message recorded
+
+    processing_assets --> failed : Worker error
+
+    processing_bim --> failed : Worker error
+
+    failed --> uploaded : User retries\n(POST /datasets/{id}/retry)
+
+    ready --> [*] : Dataset deleted\n(CASCADE removes all children)
+
+    note right of harmonizing
+        processing_jobs.status transitions:
+        queued → processing → completed / failed
+        progress: 0 → 100 (realtime via Supabase)
+    end note
+
+    note right of ready
+        datasets.status = "ready"
+        Viewer can now stream COPC
+        AI agent can now query features
+    end note

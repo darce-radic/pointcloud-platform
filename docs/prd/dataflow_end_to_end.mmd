@@ -1,0 +1,146 @@
+flowchart TD
+    classDef identity fill:#1a1a2e,stroke:#4a4a8a,color:#e0e0ff,rx:6
+    classDef storage fill:#0d2137,stroke:#1e6091,color:#b3d9ff,rx:6
+    classDef worker fill:#1a2e1a,stroke:#2e7d32,color:#c8e6c9,rx:6
+    classDef ai fill:#2e1a2e,stroke:#7b1fa2,color:#e1bee7,rx:6
+    classDef viewer fill:#2e2a1a,stroke:#f57f17,color:#fff9c4,rx:6
+    classDef db fill:#1a1a1a,stroke:#555,color:#ccc,rx:4
+    classDef ext fill:#2e1a1a,stroke:#c62828,color:#ffcdd2,rx:6
+
+    %% ── IDENTITY & BILLING DOMAIN ──────────────────────────────
+    subgraph IB["🔐 Identity & Billing Domain"]
+        direction TB
+        U["👤 User (Browser)"]:::identity
+        AUTH["Supabase Auth\n(auth.users)"]:::db
+        PROF["profiles\n(plan, storage quota)"]:::db
+        STRIPE["Stripe\n(Payments)"]:::ext
+        N8N_HOOK["n8n Onboarding\nWebhook"]:::ext
+
+        U -->|"Sign up / Login"| AUTH
+        AUTH -->|"trigger: on_auth_user_created"| PROF
+        U -->|"Subscribe to plan"| STRIPE
+        STRIPE -->|"webhook: checkout.session.completed"| PROF
+        PROF -->|"new user event"| N8N_HOOK
+    end
+
+    %% ── DATA HIERARCHY DOMAIN ──────────────────────────────────
+    subgraph DH["📁 Data Hierarchy Domain"]
+        direction TB
+        ORG["organizations"]:::db
+        PROJ["projects"]:::db
+        DS["datasets\n(status: pending)"]:::db
+
+        PROF -->|"member of"| ORG
+        ORG -->|"owns"| PROJ
+        PROJ -->|"contains"| DS
+    end
+
+    %% ── INGESTION PIPELINE ─────────────────────────────────────
+    subgraph ING["⬆️ Ingestion Pipeline"]
+        direction LR
+        UP["Upload\n(presigned S3 URL)"]:::identity
+        R2["Cloudflare R2\n(raw .las / .laz)"]:::storage
+        COMP["POST /datasets/complete-upload\n(API Router)"]:::worker
+
+        UP -->|"PUT raw file"| R2
+        UP -->|"notify completion"| COMP
+        COMP -->|"update datasets.raw_s3_key\nstatus → uploaded"| DS
+    end
+
+    %% ── PROCESSING WORKER CHAIN ────────────────────────────────
+    subgraph PW["⚙️ Processing Worker Chain"]
+        direction TB
+        JOB_H["processing_jobs\n(status: queued)"]:::db
+
+        subgraph W1["Worker 1: Harmonization"]
+            H1["PDAL: outlier filter\n(filters.outlier)"]:::worker
+            H2["PDAL: ground classify\n(filters.smrf)"]:::worker
+            H3["YOLOv8: GDPR blur\n(faces + plates)"]:::worker
+            H1 --> H2 --> H3
+        end
+
+        subgraph W2["Worker 2: Tiling"]
+            T1["PDAL: COPC writer\n(octree tiling)"]:::worker
+            T2["Upload COPC → R2"]:::worker
+            T1 --> T2
+        end
+
+        subgraph W3["Worker 3: Road Assets"]
+            RA1["PDAL intensity filter\n(retro-reflective scan)"]:::worker
+            RA2["DBSCAN clustering\n(pole detection)"]:::worker
+            RA3["GeoJSON export\n(road_assets_url)"]:::worker
+            RA1 --> RA2 --> RA3
+        end
+
+        subgraph W4["Worker 4: BIM Extraction"]
+            B1["PDAL RANSAC\n(plane fitting)"]:::worker
+            B2["IfcOpenShell\n(IFC4 generation)"]:::worker
+            B3["ezdxf\n(floor plan DXF)"]:::worker
+            B1 --> B2 --> B3
+        end
+
+        DS -->|"POST /datasets/{id}/process"| JOB_H
+        JOB_H -->|"claim_next_job() RPC"| W1
+        W1 -->|"harmonized .laz → R2"| W2
+        JOB_H -->|"claim_next_job() RPC"| W3
+        JOB_H -->|"claim_next_job() RPC"| W4
+
+        T2 -->|"UPDATE datasets\ncopc_url, status→ready"| DS
+        RA3 -->|"UPDATE datasets\nroad_assets_url, road_asset_stats"| DS
+        B3 -->|"UPDATE datasets\nifc_url, dxf_url, bim_stats"| DS
+
+        FEAT["features\n(individual assets)"]:::db
+        RA2 -->|"INSERT per-asset rows"| FEAT
+        B2 -->|"INSERT per-element rows"| FEAT
+
+        PANO["panoramic_images\n(360° frames)"]:::db
+        ING -->|"upload image sequence"| PANO
+    end
+
+    %% ── VIEWER DOMAIN ──────────────────────────────────────────
+    subgraph VW["🖥️ Viewer Domain"]
+        direction LR
+        V2D["2D Leaflet Map\n(trajectory + asset markers)"]:::viewer
+        V3D["3D CesiumJS\n(COPC point cloud stream)"]:::viewer
+        V360["360° Pannellum\n(panoramic image)"]:::viewer
+        ZUST["Zustand State\n(selectedAssetId, cameraPos)"]:::viewer
+
+        DS -->|"GET copc_url"| V3D
+        DS -->|"GET road_assets_url → GeoJSON"| V2D
+        PANO -->|"GET /datasets/{id}/images/nearest"| V360
+        FEAT -->|"GET /datasets/{id}/features"| V2D
+
+        V2D <-->|"sync click event"| ZUST
+        V3D <-->|"sync click event"| ZUST
+        V360 <-->|"sync click event"| ZUST
+    end
+
+    %% ── AI AGENT DOMAIN ────────────────────────────────────────
+    subgraph AI["🤖 AI & Automation Domain"]
+        direction TB
+        CHAT["AiChatPanel\n(user message)"]:::ai
+        CONV["conversations\n+ messages"]:::db
+        GRAPH["LangGraph Agent\n(FastAPI SSE stream)"]:::ai
+        VEC["workflow_node_schemas\n(pgvector search)"]:::db
+        N8N["n8n Workflow Engine\n(Railway)"]:::ext
+        WF["n8n_workflows\n(persisted JSON)"]:::db
+        WT["workflow_tools\n(viewer buttons)"]:::db
+        WTB["Viewer Toolbar\n(dynamic buttons)"]:::viewer
+
+        CHAT -->|"POST /conversations/stream"| GRAPH
+        GRAPH -->|"INSERT messages"| CONV
+        GRAPH -->|"embed + cosine search"| VEC
+        VEC -->|"matching node schemas"| GRAPH
+        GRAPH -->|"POST /api/v1/workflows"| N8N
+        N8N -->|"deployed workflow ID"| WF
+        GRAPH -->|"INSERT tool record"| WT
+        WT -->|"GET /workflow-tools"| WTB
+        WTB -->|"POST /workflow-tools/{id}/run"| N8N
+    end
+
+    %% ── CROSS-DOMAIN CONNECTIONS ───────────────────────────────
+    U -->|"upload file"| UP
+    U -->|"open viewer"| VW
+    U -->|"open chat"| CHAT
+    DS -->|"context for AI"| GRAPH
+    FEAT -->|"context for AI"| GRAPH

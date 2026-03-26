@@ -1,0 +1,70 @@
+flowchart LR
+    classDef domain fill:#111827,stroke:#374151,color:#f9fafb,rx:10,padding:20px
+    classDef arrow stroke:#6b7280
+
+    subgraph D1["🔐 Identity & Billing"]
+        IB1["User signup → profiles trigger"]
+        IB2["Stripe webhook → plan update"]
+        IB3["Storage quota enforcement"]
+    end
+
+    subgraph D2["📁 Data Hierarchy"]
+        DH1["Organization → Project → Dataset\nhierarchy creation"]
+        DH2["RLS: org_id isolation\non every table"]
+        DH3["Dataset status lifecycle\npending → uploaded → processing → ready"]
+    end
+
+    subgraph D3["⚙️ Processing Workers"]
+        PW1["Harmonization\n(PDAL + YOLOv8)"]
+        PW2["Tiling\n(COPC → R2)"]
+        PW3["Road Asset Extraction\n(PDAL + DBSCAN)"]
+        PW4["BIM Extraction\n(RANSAC + IfcOpenShell)"]
+    end
+
+    subgraph D4["🖥️ Viewer"]
+        VW1["3D Point Cloud\n(CesiumJS + COPC stream)"]
+        VW2["2D Map\n(Leaflet + GeoJSON overlay)"]
+        VW3["360° Panoramic\n(Pannellum)"]
+        VW4["Zustand cross-panel sync"]
+    end
+
+    subgraph D5["🤖 AI & Automation"]
+        AI1["LangGraph Agent\n(SSE chat stream)"]
+        AI2["pgvector node search\n(workflow_node_schemas)"]
+        AI3["n8n workflow deploy\n+ viewer tool publish"]
+    end
+
+    %% D1 → D2: user identity gates data creation
+    D1 -->|"profiles.organization_id\ngates project/dataset creation"| D2
+
+    %% D1 → D3: plan limits gate processing
+    D1 -->|"storage_limit_bytes\nblocks upload if exceeded"| D3
+
+    %% D2 → D3: dataset triggers processing jobs
+    D2 -->|"POST /datasets/{id}/process\ninserts processing_jobs row"| D3
+
+    %% D3 → D2: workers write results back to datasets
+    D3 -->|"UPDATE datasets:\ncopc_url, road_assets_url,\nifc_url, bim_stats"| D2
+
+    %% D3 → D4: viewer reads processed outputs
+    D3 -->|"COPC stream via\ncopc_url (R2)"| D4
+    D3 -->|"GeoJSON overlay via\nroad_assets_url"| D4
+    D3 -->|"Nearest panoramic image\nvia /images/nearest API"| D4
+
+    %% D2 → D4: viewer reads dataset metadata
+    D2 -->|"Dataset bbox, centroid,\ncapture metadata"| D4
+
+    %% D2 → D5: AI agent receives dataset context
+    D2 -->|"Dataset record + features\nas agent context"| D5
+
+    %% D4 → D5: viewer state triggers AI queries
+    D4 -->|"Selected asset ID\ntriggered AI query"| D5
+
+    %% D5 → D4: AI publishes tools to viewer toolbar
+    D5 -->|"workflow_tools rows\nrendered as viewer buttons"| D4
+
+    %% D5 → D3: AI-generated workflows invoke workers
+    D5 -->|"n8n workflow triggers\ncustom processing jobs"| D3
+
+    %% D1 → D5: AI access gated by plan
+    D1 -->|"Pro/Enterprise plan\nunlocks AI assistant"| D5
