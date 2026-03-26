@@ -1,0 +1,225 @@
+erDiagram
+
+    %% ============================================================
+    %% DOMAIN 1: IDENTITY & BILLING
+    %% ============================================================
+
+    AUTH_USERS {
+        uuid id PK
+        text email
+        timestamptz created_at
+    }
+
+    PROFILES {
+        uuid id PK "FK → auth.users"
+        uuid organization_id FK
+        text stripe_customer_id
+        text subscription_plan
+        text subscription_status
+        bigint storage_limit_bytes
+        bigint storage_used_bytes
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    ORGANIZATIONS {
+        uuid id PK
+        text name
+        text slug
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    ORGANIZATION_MEMBERS {
+        uuid id PK
+        uuid organization_id FK
+        uuid user_id FK
+        text role
+        uuid invited_by FK
+        timestamptz accepted_at
+        timestamptz created_at
+    }
+
+    %% ============================================================
+    %% DOMAIN 2: DATA HIERARCHY
+    %% ============================================================
+
+    PROJECTS {
+        uuid id PK
+        uuid organization_id FK
+        text name
+        text description
+        uuid created_by FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    DATASETS {
+        uuid id PK
+        uuid organization_id FK
+        uuid project_id FK
+        text name
+        text description
+        text status
+        text raw_s3_key
+        bigint raw_file_size_bytes
+        text raw_format
+        text copc_s3_key
+        bigint copc_file_size_bytes
+        bigint point_count
+        geometry bbox_geom
+        geometry centroid_geom
+        integer crs_epsg
+        date capture_date
+        text capture_type
+        text copc_url
+        text dtm_url
+        text road_assets_url
+        jsonb road_asset_stats
+        text ifc_url
+        text dxf_url
+        text segments_url
+        jsonb bim_stats
+        uuid created_by FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    %% ============================================================
+    %% DOMAIN 3: PROCESSING & RESULTS
+    %% ============================================================
+
+    PROCESSING_JOBS {
+        uuid id PK
+        uuid organization_id FK
+        uuid dataset_id FK
+        text job_type
+        text status
+        integer progress
+        text progress_message
+        text worker_id
+        text sqs_message_id
+        jsonb input_params
+        jsonb output_s3_keys
+        text error_message
+        timestamptz started_at
+        timestamptz completed_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    FEATURES {
+        uuid id PK
+        uuid organization_id FK
+        uuid dataset_id FK
+        uuid job_id FK
+        text feature_type
+        text feature_subtype
+        text label
+        float confidence
+        geometry geom
+        jsonb properties
+        timestamptz created_at
+    }
+
+    PANORAMIC_IMAGES {
+        uuid id PK
+        uuid dataset_id FK
+        text image_url
+        timestamptz capture_time
+        geometry geom
+        float heading
+        float pitch
+        float roll
+        timestamptz created_at
+    }
+
+    %% ============================================================
+    %% DOMAIN 4: AI & AUTOMATION
+    %% ============================================================
+
+    CONVERSATIONS {
+        uuid id PK
+        uuid organization_id FK
+        uuid dataset_id FK
+        text title
+        uuid created_by FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    MESSAGES {
+        uuid id PK
+        uuid conversation_id FK
+        text role
+        text content
+        jsonb tool_calls
+        text tool_call_id
+        timestamptz created_at
+    }
+
+    N8N_WORKFLOWS {
+        uuid id PK
+        uuid organization_id FK
+        text name
+        jsonb workflow_json
+        text n8n_workflow_id
+        text status
+        boolean created_by_agent
+        timestamptz created_at
+    }
+
+    WORKFLOW_TOOLS {
+        uuid id PK
+        uuid organization_id FK
+        uuid workflow_id FK
+        text name
+        text description
+        text webhook_url
+        text icon
+        jsonb input_schema
+        timestamptz created_at
+    }
+
+    WORKFLOW_NODE_SCHEMAS {
+        uuid id PK
+        text node_type
+        jsonb schema_json
+        text description
+        vector embedding
+        timestamptz created_at
+    }
+
+    %% ============================================================
+    %% RELATIONSHIPS
+    %% ============================================================
+
+    AUTH_USERS ||--o| PROFILES : "has profile"
+    AUTH_USERS ||--o{ ORGANIZATION_MEMBERS : "belongs to"
+    AUTH_USERS ||--o{ PROJECTS : "creates"
+    AUTH_USERS ||--o{ DATASETS : "creates"
+    AUTH_USERS ||--o{ CONVERSATIONS : "creates"
+
+    ORGANIZATIONS ||--o{ ORGANIZATION_MEMBERS : "has members"
+    ORGANIZATIONS ||--o{ PROJECTS : "owns"
+    ORGANIZATIONS ||--o{ DATASETS : "owns"
+    ORGANIZATIONS ||--o{ PROCESSING_JOBS : "owns"
+    ORGANIZATIONS ||--o{ FEATURES : "owns"
+    ORGANIZATIONS ||--o{ CONVERSATIONS : "owns"
+    ORGANIZATIONS ||--o{ N8N_WORKFLOWS : "owns"
+    ORGANIZATIONS ||--o{ WORKFLOW_TOOLS : "owns"
+
+    PROFILES }o--|| ORGANIZATIONS : "member of"
+
+    PROJECTS ||--o{ DATASETS : "contains"
+
+    DATASETS ||--o{ PROCESSING_JOBS : "triggers"
+    DATASETS ||--o{ FEATURES : "yields"
+    DATASETS ||--o{ PANORAMIC_IMAGES : "has"
+    DATASETS ||--o{ CONVERSATIONS : "discussed in"
+
+    PROCESSING_JOBS ||--o{ FEATURES : "produces"
+
+    CONVERSATIONS ||--o{ MESSAGES : "contains"
+
+    N8N_WORKFLOWS ||--o{ WORKFLOW_TOOLS : "published as"
