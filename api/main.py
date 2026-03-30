@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from config import settings
 
-from routers import datasets, conversations, organizations, projects, jobs, billing, workflow_tools
+from routers import datasets, conversations, organizations, projects, jobs, billing, workflow_tools, stac
 from agent import graph as agent_graph
 
 
@@ -27,7 +27,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.APP_DOMAIN, "http://localhost:5173"],
+    allow_origins=[settings.APP_DOMAIN, "http://localhost:3000", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,6 +41,7 @@ app.include_router(jobs.router, prefix="/api/v1", tags=["Jobs"])
 app.include_router(conversations.router, prefix="/api/v1", tags=["AI"])
 app.include_router(billing.router, prefix="/api/v1", tags=["Billing"])
 app.include_router(workflow_tools.router, prefix="/api/v1", tags=["Workflow Tools"])
+app.include_router(stac.router, prefix="/api/v1", tags=["STAC Catalogue"])
 app.include_router(agent_graph.router)
 
 

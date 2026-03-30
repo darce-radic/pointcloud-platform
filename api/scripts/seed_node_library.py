@@ -34,6 +34,9 @@ except ImportError:
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", os.environ.get("SUPABASE_ANON_KEY", ""))
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+# Optional: override the OpenAI base URL (e.g. to use a proxy or the real API)
+# Set OPENAI_BASE_URL="https://api.openai.com/v1" to bypass any proxy
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", None)
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIM = 1536
 
@@ -302,7 +305,10 @@ def main():
     print(f"Connecting to Supabase: {SUPABASE_URL[:40]}...")
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    openai_kwargs: dict = {"api_key": OPENAI_API_KEY}
+    if OPENAI_BASE_URL:
+        openai_kwargs["base_url"] = OPENAI_BASE_URL
+    openai_client = OpenAI(**openai_kwargs)
 
     print(f"Generating embeddings for {len(NODE_LIBRARY)} nodes using {EMBEDDING_MODEL}...")
     texts = [make_embedding_text(node) for node in NODE_LIBRARY]

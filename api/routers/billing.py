@@ -18,8 +18,9 @@ from supabase import Client
 from config import settings
 from dependencies import get_current_user, get_supabase, AuthenticatedUser
 
-N8N_PAYMENT_FAILED_WEBHOOK = "https://n8n-production-74b2f.up.railway.app/webhook/payment-failed"
-N8N_NEW_USER_WEBHOOK = "https://n8n-production-74b2f.up.railway.app/webhook/new-user-onboarding"
+# Webhook URLs are configured via N8N_PAYMENT_FAILED_WEBHOOK / N8N_NEW_USER_WEBHOOK env vars
+N8N_PAYMENT_FAILED_WEBHOOK = settings.N8N_PAYMENT_FAILED_WEBHOOK
+N8N_NEW_USER_WEBHOOK = settings.N8N_NEW_USER_WEBHOOK
 
 
 async def _notify_n8n(url: str, payload: dict) -> None:

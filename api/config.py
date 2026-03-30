@@ -31,10 +31,16 @@ class Settings(BaseSettings):
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
     R2_BUCKET_NAME: str = "pointcloud-platform-data"
+    # Public base URL for R2 objects (custom domain or r2.dev subdomain)
+    # Example: https://assets.yourdomain.com  or  https://pub-<hash>.r2.dev
+    R2_PUBLIC_BASE: str = ""
 
-    # ── n8n (optional — workflow automation) ─────────────────────────────────
+    # ── n8n (optional — workflow automation) ───────────────────────────────────────────────────
     N8N_API_URL: str = ""
     N8N_API_KEY: str = ""
+    # Webhook URLs triggered by platform events — set in n8n and paste here
+    N8N_PAYMENT_FAILED_WEBHOOK: str = ""
+    N8N_NEW_USER_WEBHOOK: str = ""
 
     # ── Stripe (optional — billing) ───────────────────────────────────────────
     STRIPE_SECRET_KEY: str = ""

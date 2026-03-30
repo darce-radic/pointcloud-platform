@@ -136,15 +136,27 @@ export default function CesiumViewer({
         if (copcUrl) {
           await loadPointCloud(Cesium, viewer, copcUrl)
         } else {
-          // No COPC yet — fly to a default location and show placeholder
-          viewer.camera.flyTo({
-            destination: Cesium.Cartesian3.fromDegrees(151.2093, -33.8688, 500),
-            orientation: {
-              heading: Cesium.Math.toRadians(0),
-              pitch: Cesium.Math.toRadians(-45),
-              roll: 0,
-            },
-          })
+          // No COPC yet — fly to the dataset bounding box if available,
+          // otherwise stay at the current globe view (no hardcoded fallback).
+          if (boundingBox) {
+            const centerLon = (boundingBox.minX + boundingBox.maxX) / 2
+            const centerLat = (boundingBox.minY + boundingBox.maxY) / 2
+            // Estimate altitude from the bbox extent
+            const spanDeg = Math.max(
+              boundingBox.maxX - boundingBox.minX,
+              boundingBox.maxY - boundingBox.minY
+            )
+            const altitudeM = Math.max(spanDeg * 111_000 * 2, 200)
+            viewer.camera.flyTo({
+              destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, altitudeM),
+              orientation: {
+                heading: Cesium.Math.toRadians(0),
+                pitch: Cesium.Math.toRadians(-45),
+                roll: 0,
+              },
+            })
+          }
+          // Show a processing overlay instead of an empty globe
           setIsLoading(false)
         }
 

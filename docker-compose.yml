@@ -3,19 +3,20 @@ version: "3.9"
 # ── PointCloud Platform — Local Development Stack ─────────────────────────────
 #
 # Services:
-#   api           — FastAPI backend (port 8000)
-#   frontend      — Vite + React frontend (port 5173)
-#   worker-tiling — PDAL COPC tiling worker
-#   worker-bim    — BIM extraction worker (Cloud2BIM + IfcOpenShell)
-#   worker-road   — Road asset extraction worker (OpenPCDet)
-#   n8n           — Workflow automation (port 5678)
-#   redis         — Cache and future job broker (port 6379)
-#   localstack    — Local AWS S3 + SQS emulator (port 4566)
+#   api                  — FastAPI backend (port 8000)
+#   frontend             — Next.js frontend (port 3000)
+#   worker-tiling        — PDAL COPC tiling worker
+#   worker-bim           — BIM extraction worker (Cloud2BIM + IfcOpenShell)
+#   worker-road          — Road asset extraction worker (PDAL + OpenPCDet)
+#   worker-harmonization — PDAL harmonization worker (noise removal, ground classification, DTM)
+#   n8n                  — Workflow automation (port 5678)
+#   redis                — Cache and future job broker (port 6379)
+#   localstack           — Local S3 emulator for development (port 4566)
 #
 # Usage:
 #   cp .env.example .env && fill in values
 #   docker-compose up api frontend n8n redis localstack
-#   docker-compose up worker-tiling worker-bim worker-road  (separate terminal)
+#   docker-compose up worker-tiling worker-bim worker-road worker-harmonization  (separate terminal)
 
 networks:
   platform:
@@ -40,21 +41,27 @@ services:
     environment:
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pointcloud-platform}
-      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/processing-jobs.fifo}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Cloudflare R2 (or LocalStack for local dev)
+      R2_ENDPOINT_URL: ${R2_ENDPOINT_URL:-http://localstack:4566}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-test}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-test}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-pointcloud-platform-data}
+      R2_PUBLIC_BASE: ${R2_PUBLIC_BASE:-http://localhost:4566/pointcloud-platform-data}
+      # Stripe billing
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      STRIPE_STARTER_PRICE_ID: ${STRIPE_STARTER_PRICE_ID}
+      STRIPE_PRO_PRICE_ID: ${STRIPE_PRO_PRICE_ID}
+      STRIPE_ENTERPRISE_PRICE_ID: ${STRIPE_ENTERPRISE_PRICE_ID}
+      # n8n automation
       N8N_API_URL: http://n8n:5678
       N8N_API_KEY: ${N8N_API_KEY:-changeme}
-      APP_DOMAIN: ${APP_DOMAIN:-http://localhost:5173}
+      N8N_PAYMENT_FAILED_WEBHOOK: ${N8N_PAYMENT_FAILED_WEBHOOK:-}
+      N8N_NEW_USER_WEBHOOK: ${N8N_NEW_USER_WEBHOOK:-}
+      # App
+      APP_DOMAIN: ${APP_DOMAIN:-http://localhost:3000}
       ENVIRONMENT: development
-      ARGO_SERVER_URL: ${ARGO_SERVER_URL:-http://localhost:2746}
-      ARGO_TOKEN: ${ARGO_TOKEN:-}
-      ARGO_NAMESPACE: ${ARGO_NAMESPACE:-processing}
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - platform
@@ -67,21 +74,23 @@ services:
       timeout: 10s
       retries: 3
 
-  # ── React Frontend ──────────────────────────────────────────────────────────
+  # ── Next.js Frontend ────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
     ports:
-      - "5173:5173"
+      - "3000:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      - /app/.next
     environment:
-      VITE_SUPABASE_URL: ${SUPABASE_URL}
-      VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-      VITE_API_URL: http://localhost:8000
-    command: pnpm dev --host
+      NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_CESIUM_ION_TOKEN: ${NEXT_PUBLIC_CESIUM_ION_TOKEN:-}
+    command: pnpm dev
     networks:
       - platform
 
@@ -93,11 +102,11 @@ services:
     environment:
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pointcloud-platform}
-      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/processing-jobs.fifo}
+      R2_ENDPOINT_URL: ${R2_ENDPOINT_URL:-http://localstack:4566}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-test}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-test}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-pointcloud-platform-data}
+      R2_PUBLIC_BASE: ${R2_PUBLIC_BASE:-http://localhost:4566/pointcloud-platform-data}
     networks:
       - platform
     restart: unless-stopped
@@ -110,16 +119,16 @@ services:
     environment:
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pointcloud-platform}
-      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/processing-jobs.fifo}
+      R2_ENDPOINT_URL: ${R2_ENDPOINT_URL:-http://localstack:4566}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-test}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-test}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-pointcloud-platform-data}
+      R2_PUBLIC_BASE: ${R2_PUBLIC_BASE:-http://localhost:4566/pointcloud-platform-data}
     networks:
       - platform
     restart: unless-stopped
 
-  # ── Road Assets Worker (GPU) ────────────────────────────────────────────────
+  # ── Road Assets Worker (GPU optional) ──────────────────────────────────────
   worker-road:
     build:
       context: ./workers/road-assets
@@ -127,11 +136,11 @@ services:
     environment:
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pointcloud-platform}
-      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/processing-jobs.fifo}
+      R2_ENDPOINT_URL: ${R2_ENDPOINT_URL:-http://localstack:4566}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-test}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-test}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-pointcloud-platform-data}
+      R2_PUBLIC_BASE: ${R2_PUBLIC_BASE:-http://localhost:4566/pointcloud-platform-data}
       OPENPCDET_MODEL_PATH: /models/pointpillars_traffic_signs.pth
     # Uncomment for GPU access on a CUDA-capable host:
     # deploy:
@@ -141,6 +150,23 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
+    networks:
+      - platform
+    restart: unless-stopped
+
+  # ── Harmonization Worker ────────────────────────────────────────────────────
+  worker-harmonization:
+    build:
+      context: ./workers/harmonization
+      dockerfile: Dockerfile
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      R2_ENDPOINT_URL: ${R2_ENDPOINT_URL:-http://localstack:4566}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-test}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-test}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-pointcloud-platform-data}
+      R2_PUBLIC_BASE: ${R2_PUBLIC_BASE:-http://localhost:4566/pointcloud-platform-data}
     networks:
       - platform
     restart: unless-stopped
@@ -188,13 +214,13 @@ services:
       timeout: 5s
       retries: 3
 
-  # ── LocalStack (local AWS S3 + SQS for development) ─────────────────────────
+  # ── LocalStack (local S3 emulator for development) ──────────────────────────
   localstack:
     image: localstack/localstack:3.0
     ports:
       - "4566:4566"
     environment:
-      SERVICES: s3,sqs
+      SERVICES: s3
       DEFAULT_REGION: us-east-1
       PERSISTENCE: 1
     volumes:
