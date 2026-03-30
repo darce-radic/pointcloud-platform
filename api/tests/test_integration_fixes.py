@@ -11,31 +11,26 @@ TEST_USER_ID = "user-123"
 TEST_ORG_ID = "org-456"
 MOCK_AUTH_HEADERS = {"Authorization": "Bearer mock-token"}
 
-@pytest.fixture
-def mock_verify():
-    with patch("dependencies.verify_jwt_token") as mock:
-        mock.return_value = {"sub": TEST_USER_ID, "org_id": TEST_ORG_ID}
-        yield mock
+def override_get_current_user():
+    return MagicMock(user_id=TEST_USER_ID, organization_id=TEST_ORG_ID)
+
+app.dependency_overrides[get_current_user] = override_get_current_user
 
 class TestIntegrationFixes:
     @patch("routers.workflow_tools.httpx.AsyncClient.post")
-    @patch("routers.workflow_tools.get_supabase")
-    @patch("routers.workflow_tools.get_current_user")
     @pytest.mark.asyncio
-    async def test_workflow_tools_db_integration(self, mock_get_user, mock_supabase, mock_httpx_post):
+    async def test_workflow_tools_db_integration(self, mock_httpx_post):
         """
         Integration test for POST /workflow-tools/{tool_id}/run.
         Verifies that the endpoint correctly interacts with the database to create a processing job.
         """
-        mock_get_user.return_value = MagicMock(user_id=TEST_USER_ID, organization_id=TEST_ORG_ID)
-        
         mock_client = MagicMock()
         # Mock tool fetch
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.side_effect = [
             MagicMock(data={"id": "tool-1", "name": "Test Tool", "is_active": True, "webhook_url": "http://test"}), # Tool
             MagicMock(data={"id": "ds-1", "name": "Test DS", "copc_url": "http://copc"}) # Dataset
         ]
-        mock_supabase.return_value = mock_client
+        app.dependency_overrides[get_supabase] = lambda: mock_client
         
         response = client.post(
             "/api/v1/workflow-tools/tool-1/run",
@@ -54,20 +49,16 @@ class TestIntegrationFixes:
         assert inserted_data["job_type"] == "workflow_tool:tool-1"
         assert inserted_data["status"] == "queued"
 
-    @patch("routers.conversations.get_supabase")
-    @patch("routers.conversations.get_current_user")
     @patch("routers.conversations.build_workflow_agent")
-    def test_conversations_db_integration(self, mock_agent_builder, mock_get_user, mock_supabase):
+    def test_conversations_db_integration(self, mock_agent_builder):
         """
         Integration test for POST /conversations/stream.
         Verifies that a new conversation is created and messages are saved.
         """
-        mock_get_user.return_value = MagicMock(user_id=TEST_USER_ID, organization_id=TEST_ORG_ID)
-        
         mock_client = MagicMock()
         # Mock dataset query for _ensure_conversation
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {"project_id": "proj-1"}
-        mock_supabase.return_value = mock_client
+        app.dependency_overrides[get_supabase] = lambda: mock_client
         
         async def mock_stream(*args, **kwargs):
             yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="Hello!")}}

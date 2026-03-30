@@ -11,30 +11,27 @@ TEST_USER_ID = "user-123"
 TEST_ORG_ID = "org-456"
 MOCK_AUTH_HEADERS = {"Authorization": "Bearer mock-token"}
 
+def override_get_current_user():
+    return MagicMock(user_id=TEST_USER_ID, organization_id=TEST_ORG_ID)
+
+app.dependency_overrides[get_current_user] = override_get_current_user
+
 class TestConversationsEndpoints:
-    @patch("routers.conversations.get_supabase")
-    @patch("routers.conversations.get_current_user")
-    def test_create_conversation(self, mock_get_user, mock_supabase):
-        mock_get_user.return_value = MagicMock(user_id=TEST_USER_ID, organization_id=TEST_ORG_ID)
-        
+    def test_create_conversation(self):
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {"id": "proj-1"}
-        mock_supabase.return_value = mock_client
+        app.dependency_overrides[get_supabase] = lambda: mock_client
         
         response = client.post("/api/v1/projects/proj-1/conversations", headers=MOCK_AUTH_HEADERS)
         assert response.status_code == 201
         assert "conversation_id" in response.json()
 
-    @patch("routers.conversations.get_supabase")
-    @patch("routers.conversations.get_current_user")
     @patch("routers.conversations.build_workflow_agent")
-    def test_stream_message_new_conv(self, mock_agent_builder, mock_get_user, mock_supabase):
-        mock_get_user.return_value = MagicMock(user_id=TEST_USER_ID, organization_id=TEST_ORG_ID)
-        
+    def test_stream_message_new_conv(self, mock_agent_builder):
         mock_client = MagicMock()
         # Mock dataset query for _ensure_conversation
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {"project_id": "proj-1"}
-        mock_supabase.return_value = mock_client
+        app.dependency_overrides[get_supabase] = lambda: mock_client
         
         async def mock_stream(*args, **kwargs):
             yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="Hello!")}}
