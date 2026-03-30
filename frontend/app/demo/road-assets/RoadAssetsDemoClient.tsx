@@ -22,7 +22,9 @@
  */
 
 import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import DatasetPicker from '@/components/dashboard/DatasetPicker'
 
 // Lazy-load CesiumViewer to avoid SSR issues
 const CesiumViewerDemo = lazy(() => import('./CesiumViewerDemo'))
@@ -147,6 +149,7 @@ interface RoadAssetsDemoClientProps {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function RoadAssetsDemoClient({ datasetId }: RoadAssetsDemoClientProps) {
+  const router = useRouter()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -158,6 +161,7 @@ export default function RoadAssetsDemoClient({ datasetId }: RoadAssetsDemoClient
   const [dataError, setDataError] = useState<string | null>(null)
 
   // ── UI state ────────────────────────────────────────────────────────────────
+  const [pickerOpen, setPickerOpen] = useState(false)
   const featuresRef = useRef<GeoFeature[]>([])
   const [visibleLayers, setVisibleLayers] = useState<Set<string>>(new Set(DRAW_ORDER))
   const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, x: 0, y: 0, title: '', props: [] })
@@ -477,12 +481,27 @@ export default function RoadAssetsDemoClient({ datasetId }: RoadAssetsDemoClient
           <div className="w-6 h-6 rounded-md bg-white/10 flex items-center justify-center">
             <span className="text-[10px] font-bold text-white/70">PC</span>
           </div>
-          <span className="text-sm font-semibold text-white/80">Road Asset Detection</span>
-          {dataset && (
-            <span className="text-xs text-white/30 border border-white/10 rounded px-2 py-0.5">{dataset.name}</span>
+          <span className="text-xs font-semibold text-white/80">Road Asset Detection</span>
+          {dataset ? (
+            <button
+              onClick={() => setPickerOpen(true)}
+              className="flex items-center gap-1.5 text-xs text-white/40 border border-white/10 rounded-lg px-2.5 py-1 hover:text-white/70 hover:border-white/20 transition-all"
+            >
+              <span className="truncate max-w-[160px]">{dataset.name}</span>
+              <span className="text-white/25">⌄</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setPickerOpen(true)}
+              className="flex items-center gap-1.5 text-xs text-white/30 border border-white/10 rounded-lg px-2.5 py-1 hover:text-white/60 hover:border-white/20 transition-all"
+            >
+              <span>Select dataset</span>
+              <span className="text-white/20">⌄</span>
+            </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+          {/* Dataset picker trigger (also in header for quick access) */}
           {/* View mode toggle */}
           <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1 border border-white/10">
             {(['2d', '3d'] as const).map(mode => (
@@ -763,6 +782,14 @@ export default function RoadAssetsDemoClient({ datasetId }: RoadAssetsDemoClient
             : 'Upload your own LiDAR data to detect assets automatically'}
         </p>
         <div className="flex items-center gap-3">
+          {!dataset && (
+            <button
+              onClick={() => setPickerOpen(true)}
+              className="text-xs font-medium text-white/60 border border-white/15 px-3 py-1.5 rounded-full hover:text-white hover:border-white/30 transition-all"
+            >
+              Select dataset
+            </button>
+          )}
           <span className="text-xs text-white/30">
             Powered by PDAL + DBSCAN clustering
           </span>
@@ -774,6 +801,16 @@ export default function RoadAssetsDemoClient({ datasetId }: RoadAssetsDemoClient
           </Link>
         </div>
       </footer>
+
+      {/* ── Dataset Picker Modal ── */}
+      <DatasetPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        mode="road-assets"
+        onSelect={(selected) => {
+          router.push(`/demo/road-assets?id=${selected.id}`)
+        }}
+      />
     </div>
   )
 }

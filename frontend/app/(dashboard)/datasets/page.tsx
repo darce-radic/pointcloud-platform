@@ -7,7 +7,7 @@ export default async function DatasetsPage() {
 
   const { data: datasets, error } = await supabase
     .from('datasets')
-    .select('id, name, format, status, point_count, file_size_bytes, created_at, copc_url')
+    .select('id, name, format, status, point_count, file_size_bytes, created_at, copc_url, road_assets_url, ifc_url')
     .order('created_at', { ascending: false })
 
   if (error) {
@@ -58,7 +58,7 @@ export default async function DatasetsPage() {
                 <th className="text-left px-6 py-3 text-[#444] text-xs font-medium">Size</th>
                 <th className="text-left px-6 py-3 text-[#444] text-xs font-medium">Status</th>
                 <th className="text-left px-6 py-3 text-[#444] text-xs font-medium">Uploaded</th>
-                <th className="px-6 py-3" />
+                <th className="text-left px-6 py-3 text-[#444] text-xs font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#111]">
@@ -93,15 +93,31 @@ export default async function DatasetsPage() {
                       {new Date(dataset.created_at).toLocaleDateString()}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    {dataset.copc_url && (
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {dataset.copc_url && (
+                        <Link
+                          href={`/viewer/${dataset.id}`}
+                          className="text-[#555] text-[11px] hover:text-white transition-colors px-2 py-1 rounded-md hover:bg-[#1a1a1a] border border-transparent hover:border-[#222]"
+                        >
+                          3D Viewer
+                        </Link>
+                      )}
                       <Link
-                        href={`/viewer/${dataset.id}`}
-                        className="text-[#555] text-xs hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                        href={`/demo/road-assets?id=${dataset.id}`}
+                        className="text-[#555] text-[11px] hover:text-white transition-colors px-2 py-1 rounded-md hover:bg-[#1a1a1a] border border-transparent hover:border-[#222]"
                       >
-                        View →
+                        Road Assets
                       </Link>
-                    )}
+                      {(dataset as any).ifc_url && (
+                        <Link
+                          href={`/datasets/${dataset.id}`}
+                          className="text-[#555] text-[11px] hover:text-white transition-colors px-2 py-1 rounded-md hover:bg-[#1a1a1a] border border-transparent hover:border-[#222]"
+                        >
+                          BIM
+                        </Link>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
