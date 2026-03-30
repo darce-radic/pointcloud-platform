@@ -12,7 +12,7 @@ export default async function ViewerPage({ params }: ViewerPageProps) {
 
   const { data: dataset, error } = await supabase
     .from('datasets')
-    .select('id, name, copc_url, status, point_count, crs_epsg, bounding_box')
+    .select('id, name, copc_url, road_assets_url, status, point_count, crs_epsg, bounding_box')
     .eq('id', id)
     .single()
 
@@ -33,6 +33,7 @@ export default async function ViewerPage({ params }: ViewerPageProps) {
         id: dataset.id,
         name: dataset.name,
         copcUrl: dataset.copc_url,
+        roadAssetsUrl: dataset.road_assets_url ?? null,
         status: dataset.status,
         pointCount: dataset.point_count,
         crsEpsg: dataset.crs_epsg,

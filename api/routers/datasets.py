@@ -449,3 +449,112 @@ async def trigger_road_assets(
         "status": "queued",
         "message": "Road asset extraction queued. The worker will produce a GeoJSON output.",
     }
+
+
+# ── Panoramic Image Endpoints ─────────────────────────────────────────────────
+
+@router.get(
+    "/datasets/{dataset_id}/images/nearest",
+    summary="Get the nearest panoramic image to a lat/lon coordinate",
+)
+async def get_nearest_panoramic_image(
+    dataset_id: str,
+    lat: float,
+    lon: float,
+    user: AuthenticatedUser = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Returns the nearest panoramic image to the given lat/lon coordinates.
+    Uses PostGIS ST_Distance for spatial proximity search.
+
+    Query params:
+      lat: WGS84 latitude
+      lon: WGS84 longitude
+
+    Returns:
+      { id, image_url, thumbnail_url, lat, lon, heading_deg, captured_at, sequence_index }
+    """
+    dataset = (
+        supabase.table("datasets")
+        .select("id, organization_id")
+        .eq("id", dataset_id)
+        .eq("organization_id", user.organization_id)
+        .maybe_single()
+        .execute()
+    )
+    if not dataset.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+    # Use PostGIS RPC to find nearest image
+    result = supabase.rpc(
+        "get_nearest_panoramic_image",
+        {
+            "p_dataset_id": dataset_id,
+            "p_lat": lat,
+            "p_lon": lon,
+            "p_limit": 1,
+        },
+    ).execute()
+
+    if not result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No panoramic images found for this dataset",
+        )
+
+    img = result.data[0]
+    return {
+        "id": img.get("id"),
+        "image_url": img.get("image_url"),
+        "thumbnail_url": img.get("thumbnail_url"),
+        "lat": img.get("lat"),
+        "lon": img.get("lon"),
+        "heading_deg": img.get("heading_deg"),
+        "captured_at": img.get("captured_at"),
+        "sequence_index": img.get("sequence_index"),
+    }
+
+
+@router.get(
+    "/datasets/{dataset_id}/images",
+    summary="List panoramic images for a dataset (for trajectory rendering)",
+)
+async def list_panoramic_images(
+    dataset_id: str,
+    limit: int = 200,
+    offset: int = 0,
+    user: AuthenticatedUser = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Returns a paginated list of panoramic images for a dataset.
+    Used to render the trajectory line on the 2D map panel.
+    """
+    dataset = (
+        supabase.table("datasets")
+        .select("id, organization_id")
+        .eq("id", dataset_id)
+        .eq("organization_id", user.organization_id)
+        .maybe_single()
+        .execute()
+    )
+    if not dataset.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+    result = (
+        supabase.table("panoramic_images")
+        .select("id, image_url, thumbnail_url, lat, lon, heading_deg, captured_at, sequence_index")
+        .eq("dataset_id", dataset_id)
+        .order("sequence_index")
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+
+    return {
+        "dataset_id": dataset_id,
+        "total": len(result.data),
+        "offset": offset,
+        "limit": limit,
+        "images": result.data or [],
+    }

@@ -37,6 +37,12 @@ export interface Dataset {
   raw_s3_key: string | null
   copc_url: string | null
   dtm_url: string | null
+  road_assets_url: string | null
+  road_asset_stats: Record<string, unknown> | null
+  ifc_url: string | null
+  dxf_url: string | null
+  segments_url: string | null
+  bim_stats: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
