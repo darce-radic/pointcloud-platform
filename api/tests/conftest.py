@@ -26,16 +26,12 @@ os.environ["N8N_API_URL"] = "http://localhost:5678"
 os.environ["N8N_API_KEY"] = "test-n8n-key"
 os.environ["APP_DOMAIN"] = "http://localhost:5173"
 os.environ["ENVIRONMENT"] = "test"
-os.environ["AWS_REGION"] = "us-east-1"
-os.environ["AWS_ACCESS_KEY_ID"] = "test"
-os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
-os.environ["S3_BUCKET_NAME"] = "test-bucket"
-os.environ["SQS_QUEUE_URL"] = "http://localhost:4566/000000000000/test.fifo"
 os.environ["R2_ENDPOINT_URL"] = "http://localhost:9000"
 os.environ["R2_ACCESS_KEY_ID"] = "test"
 os.environ["R2_SECRET_ACCESS_KEY"] = "test"
 os.environ["R2_BUCKET_NAME"] = "test-bucket"
-os.environ["R2_PUBLIC_BASE_URL"] = "http://localhost:9000/test-bucket"
+# Must match the env var name used in config.py and all workers
+os.environ["R2_PUBLIC_BASE"] = "http://localhost:9000/test-bucket"
 
 # ── App imports (after env vars are set) ──────────────────────────────────────
 import pytest  # noqa: E402

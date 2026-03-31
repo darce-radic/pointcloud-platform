@@ -15,6 +15,7 @@ const navItems = [
   { href: '/datasets', label: 'Datasets', icon: '◈' },
   { href: '/projects', label: 'Projects', icon: '◉' },
   { href: '/jobs', label: 'Jobs', icon: '◎' },
+  { href: '/workflows', label: 'Workflows', icon: '⬡' },
   { href: '/billing', label: 'Billing', icon: '◇' },
   { href: '/settings', label: 'Settings', icon: '◌' },
 ]
