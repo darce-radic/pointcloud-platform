@@ -345,7 +345,163 @@ def detect_traffic_signs(input_laz: Path) -> List[Dict]:
     return features
 
 
-# ── Step 5: Drain and manhole detection ──────────────────────────────────────
+# ── Step 5: Street light pole detection ─────────────────────────────────────
+
+def detect_street_light_poles(points: np.ndarray) -> List[Dict]:
+    """
+    Detect street light poles using PDAL height-above-ground + vertical cluster analysis.
+
+    Algorithm:
+      1. Keep points with HeightAboveGround in [3.0, 12.0] m (pole height band).
+      2. Cluster in XY using a 0.5 m radius cKDTree search.
+      3. Accept clusters with 10–500 points whose XY spread is < 0.6 m
+         (thin vertical objects) and Z spread is > 2.0 m (tall).
+      4. Classify as 'street_light' (Z centroid > 6 m) or 'sign_pole' otherwise.
+    """
+    features: List[Dict] = []
+    try:
+        if len(points) == 0:
+            return features
+        hag_field = "HeightAboveGround" if "HeightAboveGround" in points.dtype.names else None
+        if hag_field is None:
+            return features
+
+        hag = points[hag_field]
+        pole_mask = (hag >= 3.0) & (hag <= 12.0)
+        if pole_mask.sum() < 10:
+            return features
+
+        pole_pts = points[pole_mask]
+        x = pole_pts["X"]
+        y = pole_pts["Y"]
+        z = pole_pts["Z"]
+
+        xy = np.column_stack([x, y])
+        tree = cKDTree(xy)
+        visited = np.zeros(len(pole_pts), dtype=bool)
+
+        for i in range(len(pole_pts)):
+            if visited[i]:
+                continue
+            neighbors = tree.query_ball_point(xy[i], r=0.5)
+            if not (10 <= len(neighbors) <= 500):
+                continue
+            n_idx = np.array(neighbors)
+            cx_pts = x[n_idx]
+            cy_pts = y[n_idx]
+            cz_pts = z[n_idx]
+            xy_spread = max(
+                float(cx_pts.max() - cx_pts.min()),
+                float(cy_pts.max() - cy_pts.min()),
+            )
+            z_spread = float(cz_pts.max() - cz_pts.min())
+            if xy_spread > 0.6 or z_spread < 2.0:
+                continue
+            visited[n_idx] = True
+            cx = float(np.mean(cx_pts))
+            cy_val = float(np.mean(cy_pts))
+            cz = float(np.mean(cz_pts))
+            asset_type = "street_light" if cz > 6.0 else "sign_pole"
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [cx, cy_val, cz]},
+                "properties": {
+                    "asset_type": asset_type,
+                    "height_m": round(z_spread, 2),
+                    "xy_spread_m": round(xy_spread, 3),
+                    "point_count": len(neighbors),
+                    "detection_method": "geometric_hag",
+                },
+            })
+    except Exception as e:
+        log.warning("Street light pole detection failed: %s", e)
+    log.info("Street light poles detected: %d", len(features))
+    return features
+
+
+# ── Step 6: Kerb geometry detection ──────────────────────────────────────────
+
+def detect_kerb_geometry(points: np.ndarray) -> List[Dict]:
+    """
+    Detect kerb and gutter geometry using height discontinuity analysis.
+
+    Algorithm:
+      1. Keep points with HeightAboveGround in [0.05, 0.35] m — the kerb height band.
+      2. Cluster in XY using a 0.4 m radius search.
+      3. Accept elongated clusters (aspect ratio > 4) with ≥ 20 points.
+      4. Fit a line segment to each cluster and emit it as a LineString feature.
+    """
+    features: List[Dict] = []
+    try:
+        if len(points) == 0:
+            return features
+        hag_field = "HeightAboveGround" if "HeightAboveGround" in points.dtype.names else None
+        if hag_field is None:
+            return features
+
+        hag = points[hag_field]
+        kerb_mask = (hag >= 0.05) & (hag <= 0.35)
+        if kerb_mask.sum() < 20:
+            return features
+
+        kerb_pts = points[kerb_mask]
+        x = kerb_pts["X"]
+        y = kerb_pts["Y"]
+
+        xy = np.column_stack([x, y])
+        tree = cKDTree(xy)
+        visited = np.zeros(len(kerb_pts), dtype=bool)
+
+        for i in range(len(kerb_pts)):
+            if visited[i]:
+                continue
+            neighbors = tree.query_ball_point(xy[i], r=0.4)
+            if len(neighbors) < 20:
+                continue
+            n_idx = np.array(neighbors)
+            cx_pts = x[n_idx]
+            cy_pts = y[n_idx]
+            x_range = float(cx_pts.max() - cx_pts.min())
+            y_range = float(cy_pts.max() - cy_pts.min())
+            long_axis = max(x_range, y_range)
+            short_axis = min(x_range, y_range) + 0.001
+            if long_axis / short_axis < 4.0:
+                continue
+            visited[n_idx] = True
+
+            # PCA to find the principal axis direction
+            cluster_xy = np.column_stack([cx_pts, cy_pts])
+            centroid = cluster_xy.mean(axis=0)
+            _, _, Vt = np.linalg.svd(cluster_xy - centroid)
+            direction = Vt[0]  # Principal axis
+            proj = (cluster_xy - centroid) @ direction
+            start = centroid + float(proj.min()) * direction
+            end = centroid + float(proj.max()) * direction
+            length = float(np.linalg.norm(end - start))
+
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [float(start[0]), float(start[1])],
+                        [float(end[0]),   float(end[1])],
+                    ],
+                },
+                "properties": {
+                    "asset_type": "kerb",
+                    "length_m": round(length, 2),
+                    "point_count": len(neighbors),
+                    "detection_method": "geometric_hag",
+                },
+            })
+    except Exception as e:
+        log.warning("Kerb geometry detection failed: %s", e)
+    log.info("Kerb segments detected: %d", len(features))
+    return features
+
+
+# ── Step 7: Drain and manhole detection ──────────────────────────────────────
 
 def detect_drains(dtm_tif: Path, road_points: np.ndarray) -> List[Dict]:
     features = []
@@ -382,10 +538,16 @@ def detect_drains(dtm_tif: Path, road_points: np.ndarray) -> List[Dict]:
     return features
 
 
-# ── Step 6: Assemble GeoJSON output ──────────────────────────────────────────
+# ── Step 8: Assemble GeoJSON output ────────────────────────────────────────────────
 
-def build_geojson(road_markings: List[Dict], traffic_signs: List[Dict], drains: List[Dict]) -> dict:
-    all_features = road_markings + traffic_signs + drains
+def build_geojson(
+    road_markings: List[Dict],
+    traffic_signs: List[Dict],
+    drains: List[Dict],
+    street_lights: List[Dict],
+    kerbs: List[Dict],
+) -> dict:
+    all_features = road_markings + traffic_signs + drains + street_lights + kerbs
     return {
         "type": "FeatureCollection",
         "features": all_features,
@@ -393,12 +555,14 @@ def build_geojson(road_markings: List[Dict], traffic_signs: List[Dict], drains: 
             "road_marking_count": len(road_markings),
             "traffic_sign_count": len(traffic_signs),
             "drain_count": len(drains),
+            "street_light_count": len(street_lights),
+            "kerb_segment_count": len(kerbs),
             "total_features": len(all_features),
         },
     }
 
 
-# ── Main processing loop ──────────────────────────────────────────────────────
+# ── Main processing loop ────────────────────────────────────────────────
 
 def process_job(job: dict) -> None:
     job_id = job["id"]
@@ -455,16 +619,30 @@ def process_job(job: dict) -> None:
         update_job(job_id, "processing", 65)
         traffic_signs = detect_traffic_signs(classified_laz)
 
-        # Step 6: Drains
+        # Step 6: Street light poles
         if is_cancelled(job_id):
             update_job(job_id, "cancelled")
             return
-        update_job(job_id, "processing", 80)
+        update_job(job_id, "processing", 72)
+        street_lights = detect_street_light_poles(all_points)
+
+        # Step 7: Kerb geometry
+        if is_cancelled(job_id):
+            update_job(job_id, "cancelled")
+            return
+        update_job(job_id, "processing", 78)
+        kerbs = detect_kerb_geometry(all_points)
+
+        # Step 8: Drains
+        if is_cancelled(job_id):
+            update_job(job_id, "cancelled")
+            return
+        update_job(job_id, "processing", 84)
         drains = detect_drains(dtm_tif, road_points)
 
-        # Step 7: Build and upload GeoJSON
-        update_job(job_id, "processing", 90)
-        geojson = build_geojson(road_markings, traffic_signs, drains)
+        # Step 9: Build and upload GeoJSON
+        update_job(job_id, "processing", 92)
+        geojson = build_geojson(road_markings, traffic_signs, drains, street_lights, kerbs)
         output_geojson.write_text(json.dumps(geojson, indent=2))
 
         geojson_key = f"processed/{org_id}/{dataset_id}/{dataset_id}_road_assets.geojson"

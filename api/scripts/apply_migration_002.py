@@ -3,10 +3,11 @@ Apply migration 002 canonical schema additions to Supabase via the Management AP
 Safe to re-run — all statements use IF NOT EXISTS / OR REPLACE.
 """
 from __future__ import annotations
+import os
 import requests
 import sys
 
-SUPABASE_ACCESS_TOKEN = "sbp_8f465e0e9eceede467fe4bf1e85391fe829657a2"
+SUPABASE_ACCESS_TOKEN = os.environ.get("SUPABASE_ACCESS_TOKEN", "")
 PROJECT_REF = "bfazarpbdrppywnofvfj"
 MGMT_URL = f"https://api.supabase.com/v1/projects/{PROJECT_REF}/database/query"
 HEADERS = {
