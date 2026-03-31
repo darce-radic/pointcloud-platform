@@ -200,15 +200,16 @@ export default function LandingPage() {
         <section className="max-w-5xl mx-auto px-6 py-24 bg-[#050505] border border-[#1a1a1a] rounded-3xl mb-32">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-semibold tracking-tight mb-4">Simple, transparent pricing</h2>
-            <p className="text-[#666]">Start for free, upgrade when you need more power.</p>
+            <p className="text-[#666]">Every plan includes a 14-day trial. No credit card required to start.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
             <div className="p-6 border border-[#1a1a1a] rounded-2xl bg-black">
               <h3 className="text-lg font-medium mb-2">Starter</h3>
-              <div className="text-3xl font-semibold mb-6">$0<span className="text-sm text-[#666] font-normal">/mo</span></div>
+              <div className="text-3xl font-semibold mb-1">$19<span className="text-sm text-[#666] font-normal">/mo</span></div>
+              <p className="text-xs text-[#555] mb-6">14-day trial, then billed monthly</p>
               <ul className="space-y-3 text-sm text-[#888] mb-8">
-                <li>✓ 5GB Storage</li>
-                <li>✓ Basic PDAL workflows</li>
+                <li>✓ 25GB Storage</li>
+                <li>✓ Core PDAL workflows</li>
                 <li>✓ 3D Viewer</li>
               </ul>
             </div>
