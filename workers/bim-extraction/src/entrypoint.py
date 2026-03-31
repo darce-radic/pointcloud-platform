@@ -223,50 +223,260 @@ def run_cloud2bim_segmentation(input_laz: Path, output_dir: Path) -> dict:
 
 def _heuristic_segmentation(input_laz: Path) -> dict:
     """
-    Heuristic wall/floor detection using PDAL:
-    - Walls: vertical planar clusters (high Z variance, low XY variance)
-    - Floors: horizontal planar clusters (low Z variance)
+    Heuristic wall/floor/ceiling detection using PDAL + iterative RANSAC plane fitting.
+
+    Algorithm:
+      1. Load the point cloud and strip points outside the interior Z range.
+      2. Iteratively fit planes using RANSAC (via PDAL filters.normal +
+         manual RANSAC on normal vectors) until fewer than MIN_REMAINING
+         points remain or MAX_PLANES iterations are exhausted.
+      3. Classify each plane as:
+           - floor  : normal ≈ (0,0,1)  and  Z_centroid ≈ Z_min
+           - ceiling: normal ≈ (0,0,1)  and  Z_centroid ≈ Z_max
+           - wall   : normal ≈ horizontal (|nz| < WALL_NORMAL_Z_THRESH)
+      4. For each wall plane extract the 2-D convex-hull footprint.
+      5. Derive room polygons from the convex hull of all inlier XY points.
     """
+    RANSAC_ITERATIONS = 200          # per plane
+    RANSAC_DIST_THRESH = 0.08        # metres — point-to-plane inlier distance
+    MIN_INLIER_FRACTION = 0.03       # plane must explain ≥ 3 % of remaining pts
+    MAX_PLANES = 20
+    WALL_NORMAL_Z_THRESH = 0.25      # |nz| < this → wall
+    HORIZ_NORMAL_Z_THRESH = 0.90     # |nz| > this → floor/ceiling
+    MIN_REMAINING = 500              # stop when fewer points remain
+
     try:
+        # ── Step 1: load & filter ────────────────────────────────────────────
         pipeline_json = {
             "pipeline": [
                 str(input_laz),
-                {"type": "filters.range", "limits": "Z[0.1:3.5]"},
+                # Keep interior height band (skip underground / sky noise)
+                {"type": "filters.range", "limits": "Z[-0.5:5.0]"},
+                # Voxel downsample to ≤ 500 k pts for speed
+                {"type": "filters.voxelcentroidnearestneighbor", "cell": 0.05},
+                # Estimate normals (k=20 neighbours)
+                {"type": "filters.normal", "knn": 20},
             ]
         }
         pipeline = pdal.Pipeline(json.dumps(pipeline_json))
         pipeline.execute()
-        pts = pipeline.arrays[0] if pipeline.arrays else np.array([])
-
-        if len(pts) == 0:
+        if not pipeline.arrays or len(pipeline.arrays[0]) == 0:
             return {"walls": [], "slabs": [], "openings": [], "rooms": []}
 
-        x, y, z = pts["X"], pts["Y"], pts["Z"]
+        arr = pipeline.arrays[0]
+        pts = np.column_stack([arr["X"], arr["Y"], arr["Z"]]).astype(np.float64)
+        normals = np.column_stack([arr["NormalX"], arr["NormalY"], arr["NormalZ"]]).astype(np.float64)
 
-        # Simple bounding box wall detection
-        x_min, x_max = float(x.min()), float(x.max())
-        y_min, y_max = float(y.min()), float(y.max())
-        z_min, z_max = float(z.min()), float(z.max())
-        width = x_max - x_min
-        depth = y_max - y_min
+        x_min, x_max = float(pts[:, 0].min()), float(pts[:, 0].max())
+        y_min, y_max = float(pts[:, 1].min()), float(pts[:, 1].max())
+        z_min, z_max = float(pts[:, 2].min()), float(pts[:, 2].max())
 
-        walls = [
-            {"polygon": [[x_min, y_min], [x_min, y_max]], "height": z_max - z_min, "thickness": 0.2},
-            {"polygon": [[x_max, y_min], [x_max, y_max]], "height": z_max - z_min, "thickness": 0.2},
-            {"polygon": [[x_min, y_min], [x_max, y_min]], "height": z_max - z_min, "thickness": 0.2},
-            {"polygon": [[x_min, y_max], [x_max, y_max]], "height": z_max - z_min, "thickness": 0.2},
-        ]
-        slabs = [
-            {"type": "floor", "z": z_min, "polygon": [[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]]},
-        ]
-        rooms = [
-            {"label": "Room", "centroid": [(x_min + x_max) / 2, (y_min + y_max) / 2], "area_m2": width * depth},
-        ]
-        log.info("Heuristic segmentation: %d walls, %d slabs, 0 openings, %d rooms", len(walls), len(slabs), len(rooms))
+        # ── Step 2: iterative RANSAC plane fitting ───────────────────────────
+        rng = np.random.default_rng(seed=42)
+        remaining_mask = np.ones(len(pts), dtype=bool)
+        planes: list[dict] = []
+
+        for _ in range(MAX_PLANES):
+            remaining_idx = np.where(remaining_mask)[0]
+            if len(remaining_idx) < MIN_REMAINING:
+                break
+
+            best_inliers: np.ndarray = np.array([], dtype=int)
+            best_normal: np.ndarray = np.zeros(3)
+            best_d: float = 0.0
+
+            for _ in range(RANSAC_ITERATIONS):
+                # Sample 3 random points
+                sample_idx = rng.choice(remaining_idx, size=3, replace=False)
+                p0, p1, p2 = pts[sample_idx]
+                n = np.cross(p1 - p0, p2 - p0)
+                norm_len = np.linalg.norm(n)
+                if norm_len < 1e-9:
+                    continue
+                n = n / norm_len
+                d = -float(np.dot(n, p0))
+
+                # Point-to-plane distance for all remaining points
+                dists = np.abs(pts[remaining_idx] @ n + d)
+                inlier_local = np.where(dists < RANSAC_DIST_THRESH)[0]
+
+                if len(inlier_local) > len(best_inliers):
+                    best_inliers = remaining_idx[inlier_local]
+                    best_normal = n
+                    best_d = d
+
+            if len(best_inliers) < MIN_INLIER_FRACTION * len(remaining_idx):
+                break  # No significant plane found
+
+            # Refine normal via SVD on inlier points
+            inlier_pts = pts[best_inliers]
+            centroid = inlier_pts.mean(axis=0)
+            _, _, Vt = np.linalg.svd(inlier_pts - centroid)
+            refined_n = Vt[-1]  # Smallest singular vector = plane normal
+            if refined_n[2] < 0:
+                refined_n = -refined_n  # Orient upward / outward
+
+            planes.append({
+                "normal": refined_n,
+                "centroid": centroid,
+                "inlier_idx": best_inliers,
+                "inlier_pts": inlier_pts,
+            })
+            remaining_mask[best_inliers] = False
+
+        # ── Step 3: classify planes ──────────────────────────────────────────
+        walls: list[dict] = []
+        slabs: list[dict] = []
+
+        for plane in planes:
+            n = plane["normal"]
+            c = plane["centroid"]
+            ipts = plane["inlier_pts"]
+            nz = abs(float(n[2]))
+
+            if nz > HORIZ_NORMAL_Z_THRESH:
+                # Horizontal plane → floor or ceiling
+                slab_type = "floor" if float(c[2]) < (z_min + z_max) / 2 else "ceiling"
+                # Convex hull footprint
+                hull_pts = _convex_hull_2d(ipts[:, :2])
+                slabs.append({
+                    "type": slab_type,
+                    "z": float(c[2]),
+                    "polygon": hull_pts,
+                    "area_m2": float(_polygon_area(hull_pts)),
+                })
+
+            elif nz < WALL_NORMAL_Z_THRESH:
+                # Vertical plane → wall
+                # Project inlier points onto the wall plane's local 2-D axes
+                # and extract the bounding segment (start/end of wall run)
+                up = np.array([0.0, 0.0, 1.0])
+                along = np.cross(n, up)
+                along_len = np.linalg.norm(along)
+                if along_len < 1e-9:
+                    continue
+                along = along / along_len
+                proj = (ipts - c) @ along
+                p_start = c + float(proj.min()) * along
+                p_end   = c + float(proj.max()) * along
+                wall_height = float(ipts[:, 2].max() - ipts[:, 2].min())
+                walls.append({
+                    "polygon": [
+                        [float(p_start[0]), float(p_start[1])],
+                        [float(p_end[0]),   float(p_end[1])],
+                    ],
+                    "height": max(wall_height, 0.5),
+                    "thickness": 0.2,
+                    "normal": [float(n[0]), float(n[1])],
+                })
+
+        # ── Step 4: room polygon from all inlier XY hull ─────────────────────
+        all_inlier_xy = np.vstack([p["inlier_pts"][:, :2] for p in planes]) if planes else pts[:, :2]
+        room_hull = _convex_hull_2d(all_inlier_xy)
+        cx = float(np.mean([p[0] for p in room_hull]))
+        cy = float(np.mean([p[1] for p in room_hull]))
+        rooms = [{
+            "label": "Room",
+            "centroid": [cx, cy],
+            "area_m2": float(_polygon_area(room_hull)),
+            "polygon": room_hull,
+        }]
+
+        # Ensure at least a floor slab exists
+        if not any(s["type"] == "floor" for s in slabs):
+            slabs.insert(0, {
+                "type": "floor",
+                "z": z_min,
+                "polygon": [[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]],
+                "area_m2": (x_max - x_min) * (y_max - y_min),
+            })
+
+        log.info(
+            "RANSAC segmentation: %d walls, %d slabs, 0 openings, %d rooms",
+            len(walls), len(slabs), len(rooms),
+        )
         return {"walls": walls, "slabs": slabs, "openings": [], "rooms": rooms}
+
     except Exception as e:
-        log.warning("Heuristic segmentation failed: %s", e)
-        return {"walls": [], "slabs": [], "openings": [], "rooms": []}
+        log.warning("RANSAC segmentation failed (%s), using bbox fallback", e)
+        # Last-resort bounding-box fallback
+        try:
+            pipeline_json = {"pipeline": [str(input_laz), {"type": "filters.range", "limits": "Z[0.1:3.5]"}]}
+            pipeline = pdal.Pipeline(json.dumps(pipeline_json))
+            pipeline.execute()
+            pts_arr = pipeline.arrays[0] if pipeline.arrays else np.array([])
+            if len(pts_arr) == 0:
+                return {"walls": [], "slabs": [], "openings": [], "rooms": []}
+            x, y, z = pts_arr["X"], pts_arr["Y"], pts_arr["Z"]
+            x_min, x_max = float(x.min()), float(x.max())
+            y_min, y_max = float(y.min()), float(y.max())
+            z_min, z_max = float(z.min()), float(z.max())
+            return {
+                "walls": [
+                    {"polygon": [[x_min, y_min], [x_min, y_max]], "height": z_max - z_min, "thickness": 0.2},
+                    {"polygon": [[x_max, y_min], [x_max, y_max]], "height": z_max - z_min, "thickness": 0.2},
+                    {"polygon": [[x_min, y_min], [x_max, y_min]], "height": z_max - z_min, "thickness": 0.2},
+                    {"polygon": [[x_min, y_max], [x_max, y_max]], "height": z_max - z_min, "thickness": 0.2},
+                ],
+                "slabs": [{"type": "floor", "z": z_min,
+                           "polygon": [[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]],
+                           "area_m2": (x_max - x_min) * (y_max - y_min)}],
+                "openings": [],
+                "rooms": [{"label": "Room",
+                           "centroid": [(x_min + x_max) / 2, (y_min + y_max) / 2],
+                           "area_m2": (x_max - x_min) * (y_max - y_min)}],
+            }
+        except Exception:
+            return {"walls": [], "slabs": [], "openings": [], "rooms": []}
+
+
+# ── Geometry helpers ─────────────────────────────────────────────────────────
+
+def _convex_hull_2d(points: np.ndarray) -> list[list[float]]:
+    """
+    Compute the 2-D convex hull of an (N, 2) array using the gift-wrapping
+    algorithm.  Returns a list of [x, y] vertices in counter-clockwise order.
+    Falls back to the bounding-box corners if fewer than 3 unique points.
+    """
+    pts = np.unique(points, axis=0)
+    if len(pts) < 3:
+        # Degenerate: return bounding box
+        x0, y0 = float(pts[:, 0].min()), float(pts[:, 1].min())
+        x1, y1 = float(pts[:, 0].max()), float(pts[:, 1].max())
+        return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+
+    # Graham scan
+    pivot = pts[np.lexsort((pts[:, 1], pts[:, 0]))[0]]
+
+    def _angle(p: np.ndarray) -> float:
+        return float(np.arctan2(p[1] - pivot[1], p[0] - pivot[0]))
+
+    sorted_pts = sorted(pts, key=_angle)
+    hull = [sorted_pts[0], sorted_pts[1]]
+    for p in sorted_pts[2:]:
+        while len(hull) > 1:
+            o = hull[-2]
+            a = hull[-1]
+            cross = (a[0] - o[0]) * (p[1] - o[1]) - (a[1] - o[1]) * (p[0] - o[0])
+            if cross <= 0:
+                hull.pop()
+            else:
+                break
+        hull.append(p)
+    return [[float(v[0]), float(v[1])] for v in hull]
+
+
+def _polygon_area(polygon: list[list[float]]) -> float:
+    """Shoelace formula for the signed area of a 2-D polygon."""
+    n = len(polygon)
+    if n < 3:
+        return 0.0
+    area = 0.0
+    for i in range(n):
+        j = (i + 1) % n
+        area += polygon[i][0] * polygon[j][1]
+        area -= polygon[j][0] * polygon[i][1]
+    return abs(area) / 2.0
 
 
 # ── IFC generation ────────────────────────────────────────────────────────────
