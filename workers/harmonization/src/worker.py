@@ -18,7 +18,7 @@ Pipeline:
 Environment variables required:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
   R2_ENDPOINT_URL, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME
-  R2_PUBLIC_BASE_URL
+  R2_PUBLIC_BASE
   POLL_INTERVAL_SECONDS  (default: 10)
 """
 from __future__ import annotations
@@ -50,10 +50,7 @@ R2_ENDPOINT   = os.environ["R2_ENDPOINT_URL"]
 R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY_ID"]
 R2_SECRET_KEY = os.environ["R2_SECRET_ACCESS_KEY"]
 R2_BUCKET     = os.environ["R2_BUCKET_NAME"]
-R2_PUBLIC_BASE = os.environ.get(
-    "R2_PUBLIC_BASE_URL",
-    "https://pub-32e459203a854e7d92911da4f9a573c8.r2.dev",
-).rstrip("/")
+R2_PUBLIC_BASE = os.environ["R2_PUBLIC_BASE"].rstrip("/")
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
 
 # Voxel cell size in metres for density normalisation (2 cm)

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useCallback } from 'react'
 import { useViewerStore, PanoramicImage } from '@/lib/stores/viewerStore'
+import { API_BASE_URL } from '@/lib/api'
 
 interface MapPanelProps {
   centerLat: number | null
@@ -55,7 +56,7 @@ export default function MapPanel({ centerLat, centerLon, datasetId, onClose }: M
   // ── Fetch trajectory images on mount ─────────────────────────────────────
   useEffect(() => {
     if (!datasetId || trajectoryImages.length > 0) return
-    fetch(`/api/v1/datasets/${datasetId}/images?limit=500`)
+    fetch(`${API_BASE_URL}/api/v1/datasets/${datasetId}/images?limit=500`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data?.images?.length > 0) {
@@ -117,7 +118,7 @@ export default function MapPanel({ centerLat, centerLon, datasetId, onClose }: M
           setCameraPosition({ lat: clickLat, lon: clickLon })
           try {
             const res = await fetch(
-              `/api/v1/datasets/${datasetId}/images/nearest?lat=${clickLat}&lon=${clickLon}`
+              `${API_BASE_URL}/api/v1/datasets/${datasetId}/images/nearest?lat=${clickLat}&lon=${clickLon}`
             )
             if (res.ok) {
               const img: PanoramicImage = await res.json()

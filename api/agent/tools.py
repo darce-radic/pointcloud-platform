@@ -205,8 +205,13 @@ def publish_workflow_as_viewer_tool(
         required_inputs: JSON schema defining what the user must provide before execution
                          e.g., [{"name": "bounds", "type": "spatial_polygon", "label": "Select area"}]
     """
-    n8n_url = getattr(settings, "N8N_API_URL", "http://n8n.platform.svc.cluster.local")
-    webhook_url = f"{n8n_url}/webhook/{n8n_workflow_id}"
+    n8n_url = settings.N8N_API_URL
+    if not n8n_url:
+        raise ValueError(
+            "N8N_API_URL is not configured. Set it in your environment variables "
+            "to enable workflow tool registration."
+        )
+    webhook_url = f"{n8n_url.rstrip('/')}/webhook/{n8n_workflow_id}"
 
     tool_id = str(uuid.uuid4())
 

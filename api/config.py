@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # ── App ───────────────────────────────────────────────────────────────────
     ENVIRONMENT: str = "production"
     APP_DOMAIN: str = "https://frontend-production-4daa.up.railway.app"
+    # Comma-separated list of additional allowed CORS origins (beyond APP_DOMAIN)
+    # e.g. "https://app.yourdomain.com,https://staging.yourdomain.com"
+    ALLOWED_ORIGINS: str = ""
 
     # ── Supabase ──────────────────────────────────────────────────────────────
     SUPABASE_URL: str = ""

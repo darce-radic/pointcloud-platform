@@ -18,6 +18,16 @@ async def lifespan(app: FastAPI):
     print("Shutting down PointCloud Platform API")
 
 
+# ── CORS origins ──────────────────────────────────────────────────────────────
+# ALLOWED_ORIGINS env var accepts a comma-separated list of origins.
+# In development mode, localhost:3000 and localhost:5173 are added automatically.
+_base_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
+if settings.ENVIRONMENT != "production":
+    _base_origins += ["http://localhost:3000", "http://localhost:5173"]
+# Always include the configured APP_DOMAIN
+if settings.APP_DOMAIN and settings.APP_DOMAIN not in _base_origins:
+    _base_origins.append(settings.APP_DOMAIN)
+
 app = FastAPI(
     title="PointCloud Platform API",
     version="1.0.0",
@@ -27,7 +37,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.APP_DOMAIN, "http://localhost:3000", "http://localhost:5173"],
+    allow_origins=_base_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
